@@ -45,7 +45,7 @@ const rawSections = [
     children: ["Customer Management", "Sales Order", "Product Allocation", "Delivery / Dispatch", "Sales Invoice", "Sales Return"],
   },
   {
-    label: "Inventory Reports",
+    label: "Medicine Reports",
     children: ["Current Stock", "Low Stock", "Stock Movement", "Purchase Report", "Stock Valuation"],
   },
   { label: "Sales Reports", slug: "manufacturing-sales-reports", children: ["Sales Report", "Dispatch Report", "Sales Return Report"] },

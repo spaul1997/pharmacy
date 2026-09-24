@@ -1,4 +1,4 @@
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api").replace(/\/$/, "");
+export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "/api").replace(/\/$/, "");
 
 export async function apiRequest(path, { token, headers, timeout = 15000, ...options } = {}) {
   const requestHeaders = {

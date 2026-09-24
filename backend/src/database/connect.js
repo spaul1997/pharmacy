@@ -6,10 +6,19 @@ const toPositiveNumber = (value, fallback) => {
 };
 
 const connectDB = async () => {
-  const mongoUri = process.env.MONGODB_STRING || process.env.MONGODB_URI;
+  const mongoUriSource = process.env.MONGODB_URI
+    ? "MONGODB_URI"
+    : "MONGODB_STRING";
+  const mongoUri = (process.env.MONGODB_URI || process.env.MONGODB_STRING || "").trim();
 
   if (!mongoUri) {
-    throw new Error("Missing MONGODB_STRING. Add it to backend/.env.");
+    throw new Error("Missing MONGODB_URI. Add it to backend/.env or your live server environment.");
+  }
+
+  if (!/^mongodb(?:\+srv)?:\/\//i.test(mongoUri)) {
+    throw new Error(
+      `Invalid MongoDB connection string in ${mongoUriSource}. It must start with mongodb:// or mongodb+srv://.`
+    );
   }
 
   try {
