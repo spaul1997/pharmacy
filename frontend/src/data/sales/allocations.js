@@ -24,7 +24,7 @@ export const allocationRows = [
   {
     id: "ALC-2026-0001",
     date: "2026-07-12",
-    salesOrderId: "SO-2026-0001",
+    salesOrderId: "IN-2607-0001",
     customerId: "CUST-1001",
     customerName: "Bajaj Auto Components Pvt Ltd",
     warehouse: "Finished Goods Warehouse",
@@ -35,7 +35,7 @@ export const allocationRows = [
     expectedDispatchDate: "2026-07-14",
     assignedEmployee: "Priya Nair",
     approvedBy: "Anil Deshmukh",
-    internalRemarks: "Full allocation against SO-2026-0001.",
+    internalRemarks: "Full allocation against IN-2607-0001.",
     items: [
       { productCode: "ITM-1001", productName: "Steel Hex Bolt M8x40", uom: "PCS", orderedQty: 500, allocatedQty: 500, sourceWarehouse: "Main Manufacturing Plant", location: "Rack 1", batchNo: "", remarks: "" },
       { productCode: "ITM-1002", productName: "Industrial Ball Bearing 6204", uom: "PCS", orderedQty: 20, allocatedQty: 20, sourceWarehouse: "Main Manufacturing Plant", location: "Rack 3", batchNo: "", remarks: "" },

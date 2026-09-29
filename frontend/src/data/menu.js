@@ -22,7 +22,7 @@ const existingRoutes = {
   Manufacturer: "/master-management/manufacturer",
   Supplier: "/master-management/supplier",
   "Customer Type": "/master-management/customer-type",
-  "Tax / GST": "/master-management/tax-gst",
+  GST: "/master-management/tax-gst",
   "Unit & Packing Type": "/master-management/unit",
   "Store / Warehouse": "/master-management/warehouse",
   "Rack / Location": "/master-management/stock-location",
@@ -37,12 +37,12 @@ const rawSections = [
   },
   {
     label: "Stock Management",
-    children: ["Stock In", "Stock Out", "Stock Transfer", "Stock Adjustment", "Stock Count", "Batch / Lot Tracking"],
+    children: ["Stock Transfer", "Stock Adjustment", "Stock Count", "Batch / Lot Tracking"],
   },
   {
     label: "Pharmacy Sales",
     slug: "sales",
-    children: ["Customer Management", "Sales Order", "Product Allocation", "Delivery / Dispatch", "Sales Invoice", "Sales Return"],
+    children: ["Customer Management", "Create Bill", "Sales Order", "Product Allocation", "Delivery / Dispatch", "Sales Invoice", "Sales Return"],
   },
   {
     label: "Medicine Reports",
@@ -60,7 +60,7 @@ const rawSections = [
       "Manufacturer",
       "Supplier",
       "Customer Type",
-      "Tax / GST",
+      "GST",
       "Unit & Packing Type",
       "Store / Warehouse",
       "Rack / Location",

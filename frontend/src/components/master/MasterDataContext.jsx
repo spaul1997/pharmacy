@@ -1,117 +1,50 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { masterEntities } from "../../data/masterManagement.js";
+import React, { useCallback, useEffect, useMemo } from "react";
+import { useDispatch, useSelector } from "react-redux";
 import {
-  createMasterRow,
-  getMasterApiEntity,
-  getMasterApiEntityKeys,
-  listMasterRows,
-  updateMasterRow,
-} from "../../services/masterService.js";
-import { useScopedState } from "../../lib/scopedStorage.js";
+  addMasterRow,
+  loadMasterData,
+  loadMasterLocationOptions,
+  masterDataCleared,
+  masterScopeChanged,
+  saveMasterRow,
+} from "../../store/masterSlice.js";
 
-const MasterDataContext = createContext(null);
-const localCodePrefixes = {
-  "generic-composition": "GEN",
-  "brand-name": "BRD",
-  manufacturer: "MFR",
-  "customer-type": "CT",
-  "tax-gst": "TAX",
-  "payment-mode": "PAY",
-};
-
-function initialState() {
-  const state = {};
-  Object.keys(masterEntities).forEach((key) => {
-    state[key] = masterEntities[key].list.rows.map((row) => ({ ...row }));
-  });
-  return state;
-}
-
+// Existing screens keep a small hook API while Redux remains the single source
+// of truth. No React context or page-level request logic is used here.
 export function MasterDataProvider({ children, storageScope, token }) {
-  const [data, setData] = useScopedState(storageScope, "master-data", initialState);
-  const [loading, setLoading] = useState({});
-  const [error, setError] = useState({});
+  const dispatch = useDispatch();
 
   useEffect(() => {
-    if (!token || !storageScope) return undefined;
-
-    let mounted = true;
-    const entityKeys = getMasterApiEntityKeys();
-    setLoading(Object.fromEntries(entityKeys.map((entityKey) => [entityKey, true])));
-    setError(Object.fromEntries(entityKeys.map((entityKey) => [entityKey, ""])));
-
-    Promise.allSettled(
-      entityKeys.map(async (entityKey) => {
-        const rows = await listMasterRows(entityKey, token);
-        return { entityKey, rows };
-      })
-    ).then((results) => {
-      if (!mounted) return;
-
-      results.forEach((result, index) => {
-        const entityKey = entityKeys[index];
-        const config = getMasterApiEntity(entityKey);
-
-        if (result.status === "fulfilled") {
-          setData((prev) => ({ ...prev, [result.value.entityKey]: result.value.rows }));
-        } else {
-          setError((prev) => ({ ...prev, [entityKey]: result.reason?.message || `Unable to load ${config.label}.` }));
-          setData((prev) => ({ ...prev, [entityKey]: [] }));
-        }
-      });
-
-      setLoading((prev) => ({
-        ...prev,
-        ...Object.fromEntries(entityKeys.map((entityKey) => [entityKey, false])),
-      }));
-    });
-
-    return () => {
-      mounted = false;
-    };
-  }, [setData, storageScope, token]);
-
-  const getRows = useCallback((entityKey) => data[entityKey] || [], [data]);
-
-  const addRow = useCallback(async (entityKey, record) => {
-    if (getMasterApiEntity(entityKey)) {
-      const row = await createMasterRow(entityKey, record, token);
-      setData((prev) => ({ ...prev, [entityKey]: [row, ...(prev[entityKey] || [])] }));
-      return row;
+    if (!token || !storageScope) {
+      dispatch(masterDataCleared());
+      return;
     }
 
-    const localRecord = {
-      ...record,
-      code: record.code || `${localCodePrefixes[entityKey] || entityKey.toUpperCase()}-${Date.now()}`,
-    };
-    setData((prev) => ({ ...prev, [entityKey]: [localRecord, ...(prev[entityKey] || [])] }));
-    return localRecord;
-  }, [setData, token]);
+    dispatch(masterScopeChanged(storageScope));
+    dispatch(loadMasterData({ scope: storageScope }));
+    dispatch(loadMasterLocationOptions());
+  }, [dispatch, storageScope, token]);
 
-  const updateRow = useCallback(async (entityKey, id, patch) => {
-    if (getMasterApiEntity(entityKey)) {
-      const row = await updateMasterRow(entityKey, id, patch, token);
-      setData((prev) => ({
-        ...prev,
-        [entityKey]: (prev[entityKey] || []).map((item) => (item.code === id ? row : item)),
-      }));
-      return row;
-    }
-
-    setData((prev) => ({
-      ...prev,
-      [entityKey]: prev[entityKey].map((row) => (row.code === id ? { ...row, ...patch } : row)),
-    }));
-    return patch;
-  }, [setData, token]);
-
-  const value = useMemo(() => ({ getRows, addRow, updateRow, loading, error }), [getRows, addRow, updateRow, loading, error]);
-
-  return <MasterDataContext.Provider value={value}>{children}</MasterDataContext.Provider>;
+  return children;
 }
 
 export function useMasterData() {
-  const ctx = useContext(MasterDataContext);
-  if (!ctx) throw new Error("useMasterData must be used inside MasterDataProvider");
-  return ctx;
+  const dispatch = useDispatch();
+  const { rows, loading, error, locationOptions } = useSelector((state) => state.master);
+
+  const getRows = useCallback((entityKey) => rows[entityKey] || [], [rows]);
+  const addRow = useCallback(
+    (entityKey, record) => dispatch(addMasterRow({ entityKey, record })).unwrap().then((result) => result.row),
+    [dispatch]
+  );
+  const updateRow = useCallback(
+    (entityKey, id, patch) =>
+      dispatch(saveMasterRow({ entityKey, id, patch })).unwrap().then((result) => result.row),
+    [dispatch]
+  );
+
+  return useMemo(
+    () => ({ getRows, addRow, updateRow, loading, error, locationOptions }),
+    [addRow, error, getRows, loading, locationOptions, updateRow]
+  );
 }

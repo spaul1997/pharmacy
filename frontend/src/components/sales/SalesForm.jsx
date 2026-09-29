@@ -1,8 +1,8 @@
 import React, { useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertCircle, ChevronRight as Crumb, Paperclip, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, ChevronRight as Crumb, Paperclip, Plus, ReceiptIndianRupee, Trash2 } from "lucide-react";
 import { salesEntities } from "../../data/sales/entities.js";
-import { COMPANY_STATE, computeLineTax, computeOrderTotals, indianStates, money, money0, nextId, paymentTermsOptions, today, now } from "../../data/sales/shared.js";
+import { COMPANY_STATE, computeLineTax, computeOrderTotals, indianStates, localDateTimeNow, money, money0, nextId, nextMonthlyId, paymentTermsOptions, today, now } from "../../data/sales/shared.js";
 import { computeCustomerOutstanding } from "./salesUtils.js";
 import { ConfirmDialog } from "../ui.jsx";
 import { AuditStrip } from "../manufacturing/AuditStrip.jsx";
@@ -13,7 +13,6 @@ import { useMasterData } from "../master/MasterDataContext.jsx";
 import { useToast } from "../Toast.jsx";
 
 const fallbackIds = {
-  "sales-order": "SO-2026-0001",
   "product-allocation": "ALC-2026-0001",
   "delivery-dispatch": "DSP-2026-0001",
   "sales-invoice": "INV-2026-0001",
@@ -30,9 +29,44 @@ const LINK_FIELD_BY_PAIR = {
   "sales-invoice->sales-return": "invoiceId",
 };
 
+function productUnit(product) {
+  return product?.salesUnit || product?.unit || product?.baseUnit || "";
+}
+
+function uniqueOptions(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function normalizeFilterValue(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function compositionOptionValue(composition) {
+  return String(composition?.composition || composition?.name || "").trim();
+}
+
+function productMatchesComposition(product, selectedComposition, compositionRows) {
+  const selected = normalizeFilterValue(selectedComposition);
+  if (!selected) return false;
+
+  const composition = compositionRows.find((row) =>
+    [row.name, row.composition].some((value) => normalizeFilterValue(value) === selected)
+  );
+  const aliases = new Set(
+    [selectedComposition, composition?.name, composition?.composition]
+      .map(normalizeFilterValue)
+      .filter(Boolean)
+  );
+
+  return [product?.genericName, product?.composition]
+    .map(normalizeFilterValue)
+    .some((value) => aliases.has(value));
+}
+
 function fullAddress(customer, shipping) {
   if (shipping) return `${shipping.line1}${shipping.line2 ? ", " + shipping.line2 : ""}, ${shipping.city}, ${shipping.state} ${shipping.postalCode}`;
   if (!customer) return "";
+  if (customer.address) return customer.address;
   return `${customer.billingAddressLine1 || ""}${customer.billingAddressLine2 ? ", " + customer.billingAddressLine2 : ""}, ${customer.billingCity || ""}, ${customer.billingState || ""} ${customer.billingPostalCode || ""}`;
 }
 
@@ -62,9 +96,12 @@ function buildLinkedPatch(entityKey, fieldKey, value, salesData, masterData, has
     return {
       customerId: value,
       customerName: customer?.name || "",
+      customerMobile: customer?.mobile || customer?.phone || "",
       billingAddress: fullAddress(customer),
       shippingAddress: fullAddress(customer, defaultShipping),
       destinationState: customer?.billingState || "",
+      district: customer?.billingDistrict || "",
+      pin: customer?.billingPostalCode || "",
       gstin: customer?.gstin || "",
       paymentTerms: customer?.paymentTerms || "",
     };
@@ -187,11 +224,57 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
   const readOnly = disabled || column.readOnly;
   const { salesData, masterData } = ctx;
 
-  if (column.type === "product-select") {
+  if (column.type === "composition-select") {
     const products = masterData.getRows("product-item");
+    const compositionRows = masterData.getRows("generic-composition");
+    const selectedProduct = products.find((product) => product.code === row.productCode);
+    const currentValue = row.composition || selectedProduct?.composition || selectedProduct?.genericName || "";
+    const options = uniqueOptions([
+      ...compositionRows.filter((item) => item.status !== "Inactive").map(compositionOptionValue),
+      ...products.map((product) => product.composition || product.genericName),
+      currentValue,
+    ]);
+
     return (
       <select
         disabled={readOnly}
+        value={currentValue}
+        onChange={(event) => {
+          const composition = event.target.value;
+          onChange({
+            ...row,
+            composition,
+            genericName: compositionRows.find((item) => compositionOptionValue(item) === composition)?.name || "",
+            productCode: "",
+            productName: "",
+            hsn: "",
+            uom: "",
+            rate: 0,
+            discountPercent: 0,
+            gstRate: 0,
+          });
+        }}
+        className="w-full min-w-[260px] rounded border border-[var(--line)] px-2 py-2 text-sm disabled:bg-slate-50 disabled:text-[var(--muted)]"
+      >
+        <option value="">Select composition...</option>
+        {options.map((option) => (
+          <option key={option} value={option}>{option}</option>
+        ))}
+      </select>
+    );
+  }
+
+  if (column.type === "product-select") {
+    const products = masterData.getRows("product-item");
+    const compositionRows = masterData.getRows("generic-composition");
+    const options = column.dependsOnComposition
+      ? products.filter((product) =>
+          product.code === row.productCode || productMatchesComposition(product, row.composition, compositionRows)
+        )
+      : products;
+    return (
+      <select
+        disabled={readOnly || (column.dependsOnComposition && !row.composition)}
         value={row.productCode || ""}
         onChange={(event) => {
           const code = event.target.value;
@@ -202,22 +285,29 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
             productCode: code,
             productName: product?.name || "",
             hsn: product?.hsnCode || "",
-            uom: product?.unit || "",
-            rate: product?.price ?? row.rate,
+            composition: row.composition || product?.composition || product?.genericName || "",
+            genericName: product?.genericName || "",
+            uom: productUnit(product),
+            rate: product?.sellingPrice ?? product?.price ?? row.rate ?? 0,
             discountPercent: customer?.discountPercent ?? row.discountPercent ?? 0,
             gstRate: product?.gst ?? row.gstRate ?? 18,
           });
         }}
-        className="w-full min-w-[190px] rounded border border-[var(--line)] px-2 py-1.5 text-sm disabled:bg-slate-50 disabled:text-[var(--muted)]"
+        className="w-full min-w-[300px] rounded border border-[var(--line)] px-2 py-2 text-sm disabled:bg-slate-50 disabled:text-[var(--muted)]"
       >
-        <option value="">Select product...</option>
-        {products.map((p) => (
+        <option value="">{column.dependsOnComposition && !row.composition ? "Select composition first..." : "Select medicine..."}</option>
+        {options.map((p) => (
           <option key={p.code} value={p.code}>
             {p.code} — {p.name}
           </option>
         ))}
       </select>
     );
+  }
+
+  if (column.type === "computed-line-total") {
+    const value = (Number(row.qty) || 0) * (Number(row.rate) || 0);
+    return <span className="block whitespace-nowrap px-2 py-2 text-right text-sm font-medium text-[var(--ink)]">{money.format(value)}</span>;
   }
 
   if (column.type === "computed-gst-line") {
@@ -270,15 +360,28 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
 
 function LineItemsField({ field, rows, disabled, onChange, formValues, ctx }) {
   const items = Array.isArray(rows) ? rows : [];
+  const isMedicineRequest = field.variant === "medicine-request";
+  const requestTotal = items.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.rate) || 0), 0);
   return (
     <div>
+      {isMedicineRequest && (
+        <div className="mb-3 flex items-center gap-4">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-slate-600">Medicine Items</h3>
+          {!disabled && field.allowAddRemove && (
+            <button type="button" onClick={() => onChange([...items, {}])} className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--primary)] hover:text-[var(--primary-deep)]">
+              <Plus size={15} /> Add Item
+            </button>
+          )}
+        </div>
+      )}
       <div className="overflow-x-auto rounded-md border border-[var(--line)]">
-        <table className="w-full min-w-[900px] text-left text-sm">
+        <table className={`w-full text-left text-sm ${isMedicineRequest ? "min-w-[1100px]" : "min-w-[900px]"}`}>
           <thead className="bg-slate-50 text-xs uppercase text-[var(--muted)]">
             <tr>
               {field.columns.map((col) => (
-                <th key={col.key} className="px-2 py-2 first:pl-3">
+                <th key={col.key} className={`px-2 py-2 first:pl-3 ${col.align === "right" ? "text-right" : ""}`} style={col.minWidth ? { minWidth: col.minWidth } : undefined}>
                   {col.label}
+                  {col.required && <span className="ml-0.5 text-[var(--danger)]">*</span>}
                 </th>
               ))}
               {!disabled && field.allowAddRemove && <th className="px-2 py-2" />}
@@ -322,10 +425,18 @@ function LineItemsField({ field, rows, disabled, onChange, formValues, ctx }) {
           </tbody>
         </table>
       </div>
-      {!disabled && field.allowAddRemove && (
+      {!isMedicineRequest && !disabled && field.allowAddRemove && (
         <button type="button" onClick={() => onChange([...items, {}])} className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--primary)] hover:text-[var(--primary-deep)]">
           <Plus size={13} /> Add Item
         </button>
+      )}
+      {isMedicineRequest && (
+        <div className="mt-4 flex justify-end">
+          <div className="flex w-full max-w-sm items-center justify-between rounded-md border border-[var(--line)] bg-slate-50 px-4 py-4">
+            <span className="font-semibold text-[var(--ink)]">Total Request Value</span>
+            <span className="font-semibold text-[var(--ink)]">{money.format(requestTotal)}</span>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -337,7 +448,14 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
   }`;
   const { salesData } = ctx;
 
-  if (field.type === "lineItems") return <LineItemsField field={field} rows={value} disabled={disabled} onChange={onChange} formValues={formValues} ctx={ctx} />;
+  if (field.type === "lineItems") {
+    return (
+      <div>
+        <LineItemsField field={field} rows={value} disabled={disabled} onChange={onChange} formValues={formValues} ctx={ctx} />
+        {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
+      </div>
+    );
+  }
 
   if (["customer-select", "sales-order-select", "allocation-select", "dispatch-select", "invoice-select"].includes(field.type)) {
     const sourceEntity = { "customer-select": "customer-management", "sales-order-select": "sales-order", "allocation-select": "product-allocation", "dispatch-select": "delivery-dispatch", "invoice-select": "sales-invoice" }[field.type];
@@ -408,6 +526,19 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
           <span className="text-lg font-bold text-[var(--primary)]">{money0.format(totals.grandTotal)}</span>
         </div>
         <p className="mt-2 text-xs text-[var(--muted)]">{totals.isIntrastate ? "Intrastate transaction — CGST + SGST applied." : "Interstate transaction — IGST applied."}</p>
+      </div>
+    );
+  }
+
+  if (field.type === "bill-payment-summary") {
+    const totals = computeOrderTotals(formValues.items, formValues);
+    const received = Number(formValues.amountReceived) || 0;
+    const balance = Math.max(0, totals.grandTotal - received);
+    return (
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatBox label="Bill Total" value={money0.format(totals.grandTotal)} />
+        <StatBox label="Amount Received" value={money0.format(received)} tone={received > 0 ? "success" : undefined} />
+        <StatBox label="Balance Due" value={money0.format(balance)} tone={balance > 0 ? "warning" : "success"} />
       </div>
     );
   }
@@ -523,8 +654,8 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
         {field.autoLabel && <span className="ml-1.5 text-xs font-normal text-[var(--muted)]">({field.autoLabel})</span>}
       </label>
       <input
-        type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
-        value={value || ""}
+        type={field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "datetime-local" ? "datetime-local" : "text"}
+        value={field.type === "datetime-local" && /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? `${value}T00:00` : value || ""}
         disabled={disabled || Boolean(field.autoLabel) || field.readOnly}
         placeholder={field.placeholder}
         onChange={(event) => onChange(event.target.value)}
@@ -544,7 +675,7 @@ function Row({ label, value }) {
   );
 }
 
-export function SalesForm({ entityKey, mode, recordId }) {
+export function SalesForm({ entityKey, mode, recordId, presentation = "standard" }) {
   const entity = salesEntities[entityKey];
   const salesData = useSalesData();
   const masterData = useMasterData();
@@ -554,6 +685,7 @@ export function SalesForm({ entityKey, mode, recordId }) {
   const isView = mode === "view";
   const isCreate = mode === "create";
   const isPersisted = !isCreate;
+  const isCreateBill = presentation === "bill" && entityKey === "sales-order" && isCreate;
 
   const existingRecord = recordId ? salesData.getRecord(entityKey, recordId) : null;
   const convertFrom = !recordId ? location.state?.convertFrom : null;
@@ -564,8 +696,29 @@ export function SalesForm({ entityKey, mode, recordId }) {
     if (existingRecord) return { ...existingRecord };
 
     const rows = salesData.getRows(entityKey);
-    const base = { id: nextId(rows, "id", fallbackIds[entityKey]), date: today(), status: "Draft", activity: [{ event: "Draft", date: today(), by: "You" }] };
-    if (entity.form.tabs.some((tab) => tab.fields.some((f) => f.type === "lineItems"))) base.items = [];
+    const documentDate = entityKey === "sales-order" ? localDateTimeNow() : today();
+    const base = {
+      id: entityKey === "sales-order"
+        ? nextMonthlyId(rows, "id", "IN", documentDate)
+        : nextId(rows, "id", fallbackIds[entityKey]),
+      date: documentDate,
+      status: "Draft",
+      activity: [{ event: "Draft", date: documentDate, by: "You" }],
+      ...(entityKey === "sales-order" ? { salesChannel: "Direct" } : {}),
+      ...(isCreateBill
+        ? {
+            source: "Create Bill",
+            priority: "Normal",
+            paymentTerms: "Cash on Delivery",
+            paymentMode: "Cash",
+            amountReceived: "",
+            paymentReference: "",
+          }
+        : {}),
+    };
+    if (entity.form.tabs.some((tab) => tab.fields.some((f) => f.type === "lineItems"))) {
+      base.items = entityKey === "sales-order" ? [{}] : [];
+    }
 
     if (duplicateFrom) {
       return { ...duplicateFrom, ...base, createdBy: undefined, createdAt: undefined, updatedBy: undefined, updatedAt: undefined };
@@ -617,6 +770,15 @@ export function SalesForm({ entityKey, mode, recordId }) {
         }
       });
     });
+    if (entityKey === "sales-order") {
+      const validItems = (values.items || []).filter(
+        (item) => item.productCode && Number(item.qty) > 0
+      );
+      if (validItems.length === 0) {
+        nextErrors.items = "Add at least one medicine with a quantity greater than zero.";
+        if (!firstInvalidTab) firstInvalidTab = "items";
+      }
+    }
     setErrors(nextErrors);
     if (firstInvalidTab) {
       setActiveTab(firstInvalidTab);
@@ -643,9 +805,26 @@ export function SalesForm({ entityKey, mode, recordId }) {
 
   function handleFirstSave() {
     if (!validate()) return;
-    const record = persist({ status: "Draft" });
-    showToast(`${keyOf(record)} created.`);
-    navigate(`/sales/${entityKey}/${keyOf(record)}/view`);
+    const billTotals = isCreateBill ? computeOrderTotals(values.items, values) : null;
+    const amountReceived = Number(values.amountReceived) || 0;
+    const record = persist({
+      status: "Draft",
+      ...(isCreateBill
+        ? {
+            billNumber: values.id,
+            billTotal: billTotals.grandTotal,
+            amountReceived,
+            paymentStatus:
+              amountReceived >= billTotals.grandTotal
+                ? "Paid"
+                : amountReceived > 0
+                  ? "Partially Paid"
+                  : "Unpaid",
+          }
+        : {}),
+    });
+    showToast(isCreateBill ? `${keyOf(record)} saved in Sales Order.` : `${keyOf(record)} created.`);
+    navigate(isCreateBill ? "/sales/sales-order" : `/sales/${entityKey}/${keyOf(record)}/view`);
   }
 
   function handleSaveChanges() {
@@ -719,23 +898,87 @@ export function SalesForm({ entityKey, mode, recordId }) {
   const actions = entity.statusActions?.[values.status] || [];
   const tabs = entity.statusList ? [...entity.form.tabs, { key: "__activity", label: "Activity" }] : entity.form.tabs;
   const chainLinks = entity.renderDocumentChain ? entity.renderDocumentChain(values) : null;
+  const cancelPath = isCreateBill ? "/sales/sales-order" : `/sales/${entityKey}`;
+  const configuredPaymentModes = masterData
+    .getRows("payment-mode")
+    .filter((row) => row.status === "Active")
+    .map((row) => row.name)
+    .filter(Boolean);
+  const billTabs = isCreateBill
+    ? [
+        ...entity.form.tabs.filter((tab) => tab.key !== "credit"),
+        {
+          key: "payment",
+          label: "Payment Details",
+          fields: [
+            {
+              key: "paymentMode",
+              label: "Payment Mode",
+              type: "select",
+              required: true,
+              options: configuredPaymentModes.length
+                ? configuredPaymentModes
+                : ["Cash", "UPI", "Credit / Debit Card", "Credit Account"],
+            },
+            { key: "amountReceived", label: "Amount Received", type: "number" },
+            { key: "paymentReference", label: "Payment Reference", type: "text" },
+            { key: "billPaymentSummary", label: "Payment Summary", type: "bill-payment-summary" },
+          ],
+        },
+      ]
+    : entity.form.tabs;
+
+  function renderFormField(field) {
+    const fullWidthTypes = ["lineItems", "credit-check-panel", "order-totals-panel", "bill-payment-summary", "payments-panel"];
+    const isFullWidth = field.span === "full" || fullWidthTypes.includes(field.type);
+    return (
+      <div key={field.key} className={isFullWidth ? "sm:col-span-2 lg:col-span-3" : ""}>
+        <Field
+          field={field}
+          value={values[field.key]}
+          error={errors[field.key]}
+          disabled={isView}
+          formValues={values}
+          ctx={ctx}
+          onChange={(next) => handleFieldChange(field, next)}
+        />
+      </div>
+    );
+  }
 
   return (
     <div>
       <p className="mb-2 flex items-center gap-1 text-xs text-[var(--muted)] print:hidden">
         <span>Sales</span>
         <Crumb size={12} />
-        <Link to={`/sales/${entityKey}`} className="hover:text-[var(--primary)]">
-          {entity.label}
-        </Link>
-        <Crumb size={12} />
-        <span className="text-[var(--ink)]">
-          {isView ? recordKey : isCreate ? "New" : "Edit"} {isView ? "" : entity.singular}
-        </span>
+        {isCreateBill ? (
+          <span className="text-[var(--ink)]">Create Bill</span>
+        ) : (
+          <>
+            <Link to={`/sales/${entityKey}`} className="hover:text-[var(--primary)]">
+              {entity.label}
+            </Link>
+            <Crumb size={12} />
+            <span className="text-[var(--ink)]">
+              {isView ? recordKey : isCreate ? "New" : "Edit"} {isView ? "" : entity.singular}
+            </span>
+          </>
+        )}
       </p>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <h2 className="text-xl font-semibold text-[var(--ink)]">{isCreate ? `New ${entity.label}` : isView ? recordKey : `Edit ${recordKey}`}</h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-xl font-semibold text-[var(--ink)]">
+            {isCreateBill && <ReceiptIndianRupee size={21} className="text-[var(--primary)]" />}
+            {isCreateBill ? "Create Bill" : isCreate ? `New ${entity.label}` : isView ? recordKey : `Edit ${recordKey}`}
+          </h2>
+          {isCreateBill && <p className="mt-1 text-sm text-[var(--muted)]">Create a pharmacy bill and save it directly in Sales Order.</p>}
+        </div>
+        {isCreateBill && (
+          <button type="button" onClick={() => navigate(cancelPath)} className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
+            <ArrowLeft size={15} /> Back
+          </button>
+        )}
         {!isCreate && <span className="rounded-full border border-[var(--line)] bg-slate-50 px-2.5 py-0.5 text-xs font-semibold text-[var(--ink)]">{values.status}</span>}
       </div>
       {isView && <AuditStrip record={values} />}
@@ -760,23 +1003,38 @@ export function SalesForm({ entityKey, mode, recordId }) {
       )}
 
       <div className="mt-4 rounded-md border border-[var(--line)] bg-white">
-        <div className="flex flex-wrap gap-1 overflow-x-auto border-b border-[var(--line)] px-3 pt-2 print:hidden">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => setActiveTab(tab.key)}
-              className={`whitespace-nowrap rounded-t-md border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
-                activeTab === tab.key ? "border-[var(--primary)] text-[var(--primary)]" : "border-transparent text-[var(--muted)] hover:text-[var(--ink)]"
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        {isCreateBill ? (
+          <div className="divide-y divide-[var(--line)]">
+            {billTabs.map((tab) => (
+              <section key={tab.key} className="p-4 sm:p-5">
+                {tab.key !== "items" && (
+                  <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{tab.label}</h3>
+                )}
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {tab.fields.map(renderFormField)}
+                </div>
+              </section>
+            ))}
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-wrap gap-1 overflow-x-auto border-b border-[var(--line)] px-3 pt-2 print:hidden">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.key}
+                  type="button"
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`whitespace-nowrap rounded-t-md border-b-2 px-3 py-2.5 text-sm font-medium transition-colors ${
+                    activeTab === tab.key ? "border-[var(--primary)] text-[var(--primary)]" : "border-transparent text-[var(--muted)] hover:text-[var(--ink)]"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-        <div className="p-4 sm:p-5">
-          {activeTab === "__activity" ? (
+            <div className="p-4 sm:p-5">
+              {activeTab === "__activity" ? (
             <div className="overflow-x-auto rounded-md border border-[var(--line)]">
               <table className="w-full min-w-[480px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-[var(--muted)]">
@@ -797,24 +1055,22 @@ export function SalesForm({ entityKey, mode, recordId }) {
                 </tbody>
               </table>
             </div>
-          ) : (
-            entity.form.tabs
-              .filter((tab) => tab.key === activeTab)
-              .map((tab) => (
-                <div key={tab.key} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                  {tab.fields.map((field) => (
-                    <div key={field.key} className={field.span === "full" ? "sm:col-span-2 lg:col-span-3" : ""}>
-                      <Field field={field} value={values[field.key]} error={errors[field.key]} disabled={isView} formValues={values} ctx={ctx} onChange={(next) => handleFieldChange(field, next)} />
+              ) : (
+                entity.form.tabs
+                  .filter((tab) => tab.key === activeTab)
+                  .map((tab) => (
+                    <div key={tab.key} className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                      {tab.fields.map(renderFormField)}
                     </div>
-                  ))}
-                </div>
-              ))
-          )}
-        </div>
+                  ))
+              )}
+            </div>
+          </>
+        )}
       </div>
 
       <div className="sticky bottom-0 mt-5 flex flex-wrap items-center justify-end gap-2 rounded-md border border-[var(--line)] bg-white/95 p-3 shadow-[0_-4px_12px_rgba(15,23,42,0.06)] backdrop-blur print:hidden">
-        <button type="button" onClick={() => navigate(`/sales/${entityKey}`)} className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
+        <button type="button" onClick={() => navigate(cancelPath)} className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
           {isView ? "Close" : "Cancel"}
         </button>
         {isView && (
@@ -823,8 +1079,9 @@ export function SalesForm({ entityKey, mode, recordId }) {
           </button>
         )}
         {isCreate && (
-          <button type="button" onClick={handleFirstSave} className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
-            Save Draft
+          <button type="button" onClick={handleFirstSave} className="inline-flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
+            {isCreateBill && <ReceiptIndianRupee size={16} />}
+            {isCreateBill ? "Save Bill" : "Save Draft"}
           </button>
         )}
         {mode === "edit" && (

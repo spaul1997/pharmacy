@@ -38,7 +38,7 @@ export const dispatchRows = [
   {
     id: "DSP-2026-0001",
     date: "2026-07-14",
-    salesOrderId: "SO-2026-0001",
+    salesOrderId: "IN-2607-0001",
     allocationId: "ALC-2026-0001",
     customerId: "CUST-1001",
     customerName: "Bajaj Auto Components Pvt Ltd",

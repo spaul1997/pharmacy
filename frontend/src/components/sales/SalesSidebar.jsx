@@ -1,9 +1,9 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
-import { FileText, LayoutDashboard, PackageCheck, Receipt, Truck, Undo2, Users } from "lucide-react";
+import { FileText, LayoutDashboard, PackageCheck, Receipt, ReceiptIndianRupee, Truck, Undo2, Users } from "lucide-react";
 import { salesNav } from "../../data/sales/entities.js";
 
-const icons = { Users, FileText, PackageCheck, Truck, Receipt, Undo2 };
+const icons = { Users, FileText, PackageCheck, Truck, Receipt, ReceiptIndianRupee, Undo2 };
 
 export function SalesSidebar() {
   return (

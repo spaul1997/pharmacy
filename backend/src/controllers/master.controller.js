@@ -1,6 +1,7 @@
 import Category from "../models/Category.js";
 import Department from "../models/Department.js";
 import LocationType from "../models/LocationType.js";
+import MasterRecord from "../models/MasterRecord.js";
 import Product from "../models/Product.js";
 import RawMaterial from "../models/RawMaterial.js";
 import StockLocation from "../models/StockLocation.js";
@@ -27,13 +28,14 @@ const numberValue = (value) => {
 
 const booleanValue = (value) => value === true || value === "true";
 
-const generateMasterCode = async (Model, tenantId, prefix, width = 3, startAt = 1) => {
-  const baseCount = await Model.countDocuments({ tenantId });
+const generateMasterCode = async (Model, tenantId, prefix, width = 3, startAt = 1, filter = {}) => {
+  const query = { tenantId, ...filter };
+  const baseCount = await Model.countDocuments(query);
 
   for (let offset = 1; offset <= 1000; offset += 1) {
     const nextNumber = startAt + baseCount + offset - 1;
     const code = `${prefix}-${String(nextNumber).padStart(width, "0")}`;
-    const exists = await Model.exists({ tenantId, code });
+    const exists = await Model.exists({ ...query, code });
     if (!exists) return code;
   }
 
@@ -676,7 +678,92 @@ const stockLocationPatch = (body) => {
   return patch;
 };
 
+const masterRecordFields = [
+  "description",
+  "composition",
+  "manufacturer",
+  "drugLicense",
+  "phone",
+  "bank",
+];
+
+const serializeMasterRecord = (record) => ({
+  id: record.id || record._id,
+  code: record.code,
+  name: record.name,
+  description: record.description || "",
+  composition: record.composition || "",
+  manufacturer: record.manufacturer || "",
+  drugLicense: record.drugLicense || "",
+  phone: record.phone || "",
+  email: record.email || "",
+  rate: record.rate ?? 0,
+  bank: record.bank || "",
+  status: record.status || "Active",
+  createdAt: record.createdAt,
+  updatedAt: record.updatedAt,
+});
+
+const masterRecordPatch = (body) => {
+  const patch = {};
+
+  if (body.code !== undefined) patch.code = normalize(body.code);
+  if (body.name !== undefined) patch.name = normalize(body.name);
+  if (body.email !== undefined) patch.email = normalizeEmail(body.email);
+  if (body.rate !== undefined) patch.rate = numberValue(body.rate);
+  if (body.status !== undefined) patch.status = normalize(body.status) || "Active";
+  masterRecordFields.forEach((field) => {
+    if (body[field] !== undefined) patch[field] = normalize(body[field]);
+  });
+
+  return patch;
+};
+
+const taxRatePatch = (body) => {
+  const patch = masterRecordPatch(body);
+  delete patch.name;
+
+  if (body.rate !== undefined) {
+    patch.name = patch.rate === 0 ? "GST Exempt" : `GST ${patch.rate}%`;
+  }
+
+  return patch;
+};
+
+const pharmacyMasterConfig = (entity, prefix, overrides = {}) => ({
+  Model: MasterRecord,
+  serialize: serializeMasterRecord,
+  patch: masterRecordPatch,
+  filter: { entity },
+  createDefaults: { entity },
+  sort: { createdAt: -1, code: 1 },
+  autoCode: { prefix, width: 3, startAt: 1 },
+  requiredDraft: ["name"],
+  requiredActive: [],
+  requiredMessage: "Name is required.",
+  draftMessage: "Name is required.",
+  ...overrides,
+});
+
 const masterEntityApis = {
+  "generic-compositions": pharmacyMasterConfig("generic-compositions", "GEN", {
+    requiredActive: ["composition"],
+    requiredMessage: "Generic name and composition are required.",
+  }),
+  "brand-names": pharmacyMasterConfig("brand-names", "BRD"),
+  manufacturers: pharmacyMasterConfig("manufacturers", "MFR"),
+  "customer-types": pharmacyMasterConfig("customer-types", "CT", {
+    autoCode: { prefix: "CT", width: 2, startAt: 1 },
+  }),
+  "tax-rates": pharmacyMasterConfig("tax-rates", "GST", {
+    autoCode: { prefix: "GST", width: 2, startAt: 1 },
+    patch: taxRatePatch,
+    requiredMessage: "GST rate is required.",
+    draftMessage: "GST rate is required.",
+  }),
+  "payment-modes": pharmacyMasterConfig("payment-modes", "PAY", {
+    autoCode: { prefix: "PAY", width: 2, startAt: 1 },
+  }),
   "raw-materials": {
     Model: RawMaterial,
     serialize: serializeRawMaterial,
@@ -695,8 +782,8 @@ const masterEntityApis = {
     sort: { createdAt: -1, code: 1 },
     autoCode: { prefix: "UOM", width: 2 },
     requiredDraft: ["name"],
-    requiredActive: ["symbol", "type"],
-    requiredMessage: "Unit name, symbol, and unit type are required.",
+    requiredActive: ["type"],
+    requiredMessage: "Unit name and unit type are required.",
     draftMessage: "Unit name is required.",
   },
   suppliers: {
@@ -978,7 +1065,7 @@ export async function listMasterRows(req, res, next) {
       return res.status(404).json({ message: "Master entity not found." });
     }
 
-    const rows = await config.Model.find({ tenantId: req.auth.tenantId })
+    const rows = await config.Model.find({ tenantId: req.auth.tenantId, ...(config.filter || {}) })
       .sort(config.sort)
       .lean();
 
@@ -1006,7 +1093,8 @@ export async function createMasterRow(req, res, next) {
         req.auth.tenantId,
         config.autoCode.prefix,
         config.autoCode.width,
-        config.autoCode.startAt
+        config.autoCode.startAt,
+        config.filter
       );
     }
 
@@ -1027,6 +1115,7 @@ export async function createMasterRow(req, res, next) {
       tenantId: req.auth.tenantId,
       storeId: req.auth.storeId || null,
       createdBy: req.auth.sub,
+      ...(config.createDefaults || {}),
       ...patch,
     });
 
@@ -1069,7 +1158,7 @@ export async function updateMasterRow(req, res, next) {
     }
 
     const row = await config.Model.findOneAndUpdate(
-      { tenantId: req.auth.tenantId, code: currentCode },
+      { tenantId: req.auth.tenantId, ...(config.filter || {}), code: currentCode },
       { $set: patch },
       { new: true, runValidators: true }
     );

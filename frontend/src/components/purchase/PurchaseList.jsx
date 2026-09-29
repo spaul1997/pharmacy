@@ -17,15 +17,19 @@ import {
   Search as SearchIcon,
   SearchX,
   Send,
+  Trash2,
   X,
 } from "lucide-react";
-import { purchaseEntities } from "../../data/purchaseManagement.js";
+import { formatDisplayDate, purchaseEntities } from "../../data/purchaseManagement.js";
 import { Badge, ConfirmDialog } from "../ui.jsx";
 import { usePurchaseData } from "./PurchaseDataContext.jsx";
 import { useToast } from "../Toast.jsx";
+import { useMasterData } from "../master/MasterDataContext.jsx";
+import { useAuth } from "../../stores/AuthStore.jsx";
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const PAGE_SIZE = 5;
+const poCoverageStatuses = new Set(["Pending Approval", "Approved", "Ordered", "Partially Received", "Completed GRN", "Received"]);
 
 const summaryTones = {
   primary: "text-[var(--primary)] bg-blue-50",
@@ -45,7 +49,73 @@ const summaryGridCols = {
   6: "sm:grid-cols-3 xl:grid-cols-6",
 };
 
-const rowActionIcons = { Eye, Pencil, Check, X, ArrowRightCircle, Printer, Send, Ban, PackageCheck };
+const rowActionIcons = { Eye, Pencil, Check, X, ArrowRightCircle, Printer, Send, Ban, PackageCheck, Trash2 };
+
+function uniqueOptions(values) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function optionValues(value) {
+  return (Array.isArray(value) ? value : [value]).map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function RejectionReasonDialog({ open, reason, error, onReasonChange, onConfirm, onCancel }) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md rounded-md border border-[var(--line)] bg-white p-5 shadow-xl">
+        <h3 className="text-base font-semibold text-[var(--ink)]">Reject with reason</h3>
+        <p className="mt-1 text-sm text-[var(--muted)]">Enter the rejection reason before saving this decision.</p>
+        <label className="mt-4 block text-sm font-medium text-[var(--ink)]">
+          Rejection Reason <span className="text-[var(--danger)]">*</span>
+        </label>
+        <textarea
+          autoFocus
+          value={reason}
+          onChange={(event) => onReasonChange(event.target.value)}
+          rows={4}
+          className={`mt-1.5 w-full rounded-md border bg-white px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:ring-2 ${
+            error ? "border-[var(--danger)] focus:ring-red-100" : "border-[var(--line)] focus:ring-blue-100"
+          }`}
+        />
+        {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="rounded-md bg-[var(--danger)] px-4 py-2 text-sm font-semibold text-white hover:bg-red-700"
+          >
+            Reject
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function isDateColumn(column) {
+  return ["date", "datetime-local"].includes(column.type) || /date/i.test(column.key) || /date/i.test(column.label);
+}
+
+function isDateTimeColumn(column) {
+  return column.type === "datetime-local" || /time/i.test(column.label);
+}
+
+function dateFilterValue(value) {
+  const text = String(value || "").trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) return text.slice(0, 10);
+
+  const displayDate = text.match(/^(\d{2})-(\d{2})-(\d{4})/);
+  return displayDate ? `${displayDate[3]}-${displayDate[2]}-${displayDate[1]}` : "";
+}
 
 function toCsv(columns, rows) {
   const header = columns.map((col) => col.label).join(",");
@@ -53,7 +123,7 @@ function toCsv(columns, rows) {
     columns
       .map((col) => {
         const value = col.render ? col.render(row) : row[col.key];
-        const text = value === undefined || value === null ? "" : String(value);
+        const text = value === undefined || value === null ? "" : String(isDateColumn(col) ? formatDisplayDate(value, { includeTime: isDateTimeColumn(col) }) : value);
         return `"${text.replace(/"/g, '""')}"`;
       })
       .join(",")
@@ -63,10 +133,13 @@ function toCsv(columns, rows) {
 
 export function PurchaseList({ entityKey }) {
   const entity = purchaseEntities[entityKey];
-  const { getRows, updateRow, addRow } = usePurchaseData();
+  const { getRows, updateRow, removeRow } = usePurchaseData();
+  const masterData = useMasterData();
+  const { session } = useAuth();
   const showToast = useToast();
   const navigate = useNavigate();
   const rows = getRows(entityKey);
+  const authUserName = session?.user?.name || "You";
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -75,7 +148,11 @@ export function PurchaseList({ entityKey }) {
   const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [openMenuFor, setOpenMenuFor] = useState(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const [confirmAction, setConfirmAction] = useState(null);
+  const [reasonAction, setReasonAction] = useState(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [rejectionReasonError, setRejectionReasonError] = useState("");
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -110,8 +187,8 @@ export function PurchaseList({ entityKey }) {
       if (value) result = result.filter((row) => String(row[key]) === value);
     });
     if (entity.list.dateKey) {
-      if (dateFrom) result = result.filter((row) => row[entity.list.dateKey] >= dateFrom);
-      if (dateTo) result = result.filter((row) => row[entity.list.dateKey] <= dateTo);
+      if (dateFrom) result = result.filter((row) => dateFilterValue(row[entity.list.dateKey]) >= dateFrom);
+      if (dateTo) result = result.filter((row) => dateFilterValue(row[entity.list.dateKey]) <= dateTo);
     }
     return result;
   }, [rows, search, filters, dateFrom, dateTo, entity.list.searchKeys, entity.list.dateKey]);
@@ -133,8 +210,32 @@ export function PurchaseList({ entityKey }) {
     showToast(`Exported ${filteredRows.length} row(s).`);
   }
 
+  function filterOptions(filter) {
+    if (!filter.optionsFrom) return filter.options || [];
+
+    return [
+      ...new Set(
+        masterData
+          .getRows(filter.optionsFrom)
+          .filter((row) => row.status !== "Inactive")
+          .map((row) => row.name || row.storeName || row.code)
+          .filter(Boolean)
+      ),
+    ];
+  }
+
   function runAction(action, row) {
     setOpenMenuFor(null);
+
+    if (entityKey === "purchase-request" && action.key === "receive") {
+      const hasCompletedIssue = getRows("purchase-issue").some((issue) => {
+        return issue.requisitionNo === row.id && ["Issued", "Issue Complete"].includes(issue.status) && issue.stockUpdated !== false;
+      });
+      if (hasCompletedIssue && row.status !== "Full Issue") {
+        showToast("This purchase request already has a completed issue and cannot be marked received.", "error");
+        return;
+      }
+    }
 
     if (action.print) {
       navigate(`/purchase-management/${entityKey}/${row.id}/view`);
@@ -148,11 +249,21 @@ export function PurchaseList({ entityKey }) {
       navigate(`/purchase-management/${entityKey}/${row.id}/edit`);
       return;
     }
+    if (action.delete) {
+      setConfirmAction({ action, row });
+      return;
+    }
     if (action.convertsTo) {
       navigate(`/purchase-management/${action.convertsTo}/new`, { state: { convertFrom: { entityKey, record: row } } });
       return;
     }
     if (action.setStatus) {
+      if (action.requiresReason) {
+        setReasonAction({ action, row });
+        setRejectionReason("");
+        setRejectionReasonError("");
+        return;
+      }
       if (action.confirm) {
         setConfirmAction({ action, row });
         return;
@@ -161,13 +272,210 @@ export function PurchaseList({ entityKey }) {
     }
   }
 
-  function applyStatusChange(action, row) {
-    updateRow(entityKey, row.id, {
-      status: action.setStatus,
-      activity: [...(row.activity || []), { event: action.setStatus, date: new Date().toISOString().slice(0, 10), by: "You" }],
+  function toggleActionMenu(rowId, event) {
+    event.stopPropagation();
+
+    if (openMenuFor === rowId) {
+      setOpenMenuFor(null);
+      return;
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    setMenuPosition({
+      top: rect.bottom + 4,
+      left: Math.max(12, rect.right - 192),
     });
-    showToast(`${row.id} marked as ${action.setStatus}.`);
-    setConfirmAction(null);
+    setOpenMenuFor(rowId);
+  }
+
+  function approvalPatch(action, reason = "") {
+    if (action.approvalAction === "approve") {
+      return {
+        approvedBy: authUserName,
+        approvalDate: new Date().toISOString().slice(0, 10),
+        rejectedBy: "",
+        rejectionDate: "",
+        rejectionReason: "",
+      };
+    }
+    if (action.approvalAction === "reject") {
+      return {
+        rejectedBy: authUserName,
+        rejectionDate: new Date().toISOString().slice(0, 10),
+        rejectionReason: reason,
+        approvedBy: "",
+        approvalDate: "",
+      };
+    }
+    return {};
+  }
+
+  function statusPatch(status, date) {
+    if (status === "Received") {
+      return {
+        receivedBy: authUserName,
+        receivedDate: date,
+      };
+    }
+    return {};
+  }
+
+  function purchaseOrderCoverageRows({ includeRecord = null, excludeId = "" } = {}) {
+    const purchaseOrderRows = getRows("purchase-order").filter((row) => row.id !== excludeId && row.id !== includeRecord?.id);
+    const mergedRows = includeRecord ? [includeRecord, ...purchaseOrderRows] : purchaseOrderRows;
+    return mergedRows.filter((row) => poCoverageStatuses.has(row.status));
+  }
+
+  function getPurchaseRequest(requestId) {
+    return getRows("purchase-request").find((request) => request.id === requestId);
+  }
+
+  function requestQtyForCode(requestId, code) {
+    const request = getPurchaseRequest(requestId);
+    return (request?.items || []).filter((item) => item.code === code).reduce((sum, item) => sum + (Number(item.qty) || 0), 0);
+  }
+
+  function itemAllocationsForPurchaseOrder(po, item) {
+    const explicitAllocations = Array.isArray(item.sourcePRAllocations)
+      ? item.sourcePRAllocations
+          .map((allocation) => ({ requestId: allocation.requestId || allocation.refPR || allocation.id, qty: Number(allocation.qty) || 0 }))
+          .filter((allocation) => allocation.requestId && allocation.qty > 0)
+      : [];
+
+    if (explicitAllocations.length > 0) return explicitAllocations;
+
+    const refIds = optionValues(po.refPR);
+    const qty = Number(item.qty) || 0;
+    if (!item.code || qty <= 0 || refIds.length === 0) return [];
+    if (refIds.length === 1) return [{ requestId: refIds[0], qty }];
+
+    let remainingQty = qty;
+    const inferredAllocations = [];
+    refIds.forEach((requestId) => {
+      if (remainingQty <= 0) return;
+      const availableForRequest = requestQtyForCode(requestId, item.code);
+      if (availableForRequest <= 0) return;
+      const allocatedQty = Math.min(remainingQty, availableForRequest);
+      inferredAllocations.push({ requestId, qty: allocatedQty });
+      remainingQty -= allocatedQty;
+    });
+    return inferredAllocations;
+  }
+
+  function orderedQtyForRequestItem(requestId, code, coverageRows) {
+    return coverageRows.reduce((sum, po) => {
+      return (
+        sum +
+        (po.items || []).reduce((itemSum, item) => {
+          if (item.code !== code) return itemSum;
+          return (
+            itemSum +
+            itemAllocationsForPurchaseOrder(po, item)
+              .filter((allocation) => allocation.requestId === requestId)
+              .reduce((allocationSum, allocation) => allocationSum + (Number(allocation.qty) || 0), 0)
+          );
+        }, 0)
+      );
+    }, 0);
+  }
+
+  function remainingPurchaseRequestItems(requestId, coverageRows) {
+    const request = getPurchaseRequest(requestId);
+    if (!request) return [];
+
+    return (request.items || [])
+      .map((item) => {
+        const requestedQty = Number(item.qty) || 0;
+        const orderedQty = orderedQtyForRequestItem(requestId, item.code, coverageRows);
+        const remainingQty = Math.max(0, requestedQty - orderedQty);
+        return remainingQty > 0 ? { ...item, requestedQty, orderedQty, qty: remainingQty } : null;
+      })
+      .filter(Boolean);
+  }
+
+  async function updateLinkedPurchaseRequestCoverage(previousRecord, updatedRecord, date, time) {
+    if (entityKey !== "purchase-order") return;
+
+    const affectedRequestIds = uniqueOptions([...optionValues(previousRecord?.refPR), ...optionValues(updatedRecord?.refPR)]);
+    if (affectedRequestIds.length === 0) return;
+
+    const coverageRows = purchaseOrderCoverageRows({ includeRecord: updatedRecord });
+    await Promise.all(
+      affectedRequestIds.map((requestId) => {
+        const request = getPurchaseRequest(requestId);
+        if (!request || !["Approved", "Received"].includes(request.status)) return Promise.resolve();
+
+        const hasRemaining = remainingPurchaseRequestItems(requestId, coverageRows).length > 0;
+        if (!hasRemaining && request.status !== "Received") {
+          return updateRow("purchase-request", request.id, {
+            status: "Received",
+            receivedBy: authUserName,
+            receivedDate: date,
+            activity: [...(request.activity || []), { event: "Received", date, time, by: authUserName }],
+          });
+        }
+
+        if (hasRemaining && request.status === "Received") {
+          return updateRow("purchase-request", request.id, {
+            status: "Approved",
+            receivedBy: "",
+            receivedDate: "",
+            activity: (request.activity || []).filter((entry) => entry.event !== "Received"),
+          });
+        }
+
+        return Promise.resolve();
+      })
+    );
+  }
+
+  async function applyStatusChange(action, row, options = {}) {
+    const date = new Date().toISOString().slice(0, 10);
+    const time = new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    const updatedRow = {
+      ...row,
+      status: action.setStatus,
+      ...approvalPatch(action, options.reason),
+      ...statusPatch(action.setStatus, date),
+      activity: [...(row.activity || []), { event: action.setStatus, date, time, by: authUserName, ...(options.reason ? { reason: options.reason } : {}) }],
+    };
+
+    try {
+      await updateRow(entityKey, row.id, updatedRow);
+      await updateLinkedPurchaseRequestCoverage(row, updatedRow, date, time);
+      showToast(`${row.id} marked as ${action.setStatus}.`);
+      setConfirmAction(null);
+      setReasonAction(null);
+      setRejectionReason("");
+      setRejectionReasonError("");
+    } catch (error) {
+      showToast(error.message || `Unable to update ${row.id}.`, "error");
+    }
+  }
+
+  async function deleteRow(row) {
+    if (row.status !== "Draft") {
+      showToast("Only draft records can be deleted.", "error");
+      setConfirmAction(null);
+      return;
+    }
+
+    try {
+      await removeRow(entityKey, row.id);
+      showToast(`${row.id} deleted.`);
+      setConfirmAction(null);
+    } catch (error) {
+      showToast(error.message || `Unable to delete ${row.id}.`, "error");
+    }
+  }
+
+  function confirmReasonAction() {
+    const reason = rejectionReason.trim();
+    if (!reason) {
+      setRejectionReasonError("Rejection reason is required.");
+      return;
+    }
+    applyStatusChange(reasonAction.action, reasonAction.row, { reason });
   }
 
   return (
@@ -241,7 +549,7 @@ export function PurchaseList({ entityKey }) {
               className="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--primary)]"
             >
               <option value="">{filter.label}: All</option>
-              {filter.options.map((option) => (
+              {filterOptions(filter).map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>
@@ -333,23 +641,24 @@ export function PurchaseList({ entityKey }) {
                     <tr key={row.id} className="border-b border-slate-100 hover:bg-slate-50/60">
                       {entity.list.columns.map((col) => {
                         const value = col.render ? col.render(row) : row[col.key];
+                        const displayValue = isDateColumn(col) ? formatDisplayDate(value, { includeTime: isDateTimeColumn(col) }) : value;
                         return (
                           <td key={col.key} className={`px-3 py-3 first:pl-4 ${col.align === "right" ? "text-right" : ""}`}>
                             {col.badge ? (
-                              <Badge>{value}</Badge>
+                              <Badge>{displayValue}</Badge>
                             ) : col.link ? (
                               <Link
                                 to={`/purchase-management/${entityKey}/${row.id}/view`}
                                 className={`font-medium text-[var(--primary)] hover:underline ${col.mono ? "font-mono text-xs" : ""}`}
                               >
-                                {value}
+                                {displayValue}
                               </Link>
                             ) : col.mono ? (
-                              <span className="font-mono text-xs">{value}</span>
+                              <span className="font-mono text-xs">{displayValue}</span>
                             ) : col.money ? (
-                              money.format(value)
+                              money.format(displayValue)
                             ) : (
-                              value
+                              displayValue
                             )}
                           </td>
                         );
@@ -357,7 +666,8 @@ export function PurchaseList({ entityKey }) {
                       <td className="relative px-3 py-3 text-right">
                         <button
                           type="button"
-                          onClick={() => setOpenMenuFor(openMenuFor === row.id ? null : row.id)}
+                          onMouseDown={(event) => event.stopPropagation()}
+                          onClick={(event) => toggleActionMenu(row.id, event)}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-md text-[var(--muted)] hover:bg-slate-100 hover:text-[var(--ink)]"
                           aria-label="Row actions"
                         >
@@ -366,7 +676,9 @@ export function PurchaseList({ entityKey }) {
                         {openMenuFor === row.id && (
                           <div
                             ref={menuRef}
-                            className="absolute right-3 top-full z-20 mt-1 w-48 overflow-hidden rounded-md border border-[var(--line)] bg-white text-left shadow-lg"
+                            onMouseDown={(event) => event.stopPropagation()}
+                            className="fixed z-50 w-48 overflow-hidden rounded-md border border-[var(--line)] bg-white text-left shadow-lg"
+                            style={{ top: menuPosition.top, left: menuPosition.left }}
                           >
                             {actions.map((action) => {
                               const Icon = rowActionIcons[action.icon] || Eye;
@@ -426,10 +738,30 @@ export function PurchaseList({ entityKey }) {
       <ConfirmDialog
         open={Boolean(confirmAction)}
         title={confirmAction?.action.confirm || "Are you sure?"}
-        message={`This will update ${confirmAction?.row.id} to "${confirmAction?.action.setStatus}".`}
+        message={
+          confirmAction?.action.delete
+            ? `This will delete draft ${confirmAction?.row.id}.`
+            : `This will update ${confirmAction?.row.id} to "${confirmAction?.action.setStatus}".`
+        }
         confirmLabel={confirmAction?.action.label}
-        onConfirm={() => applyStatusChange(confirmAction.action, confirmAction.row)}
+        tone={confirmAction?.action.tone}
+        onConfirm={() => (confirmAction?.action.delete ? deleteRow(confirmAction.row) : applyStatusChange(confirmAction.action, confirmAction.row))}
         onCancel={() => setConfirmAction(null)}
+      />
+      <RejectionReasonDialog
+        open={Boolean(reasonAction)}
+        reason={rejectionReason}
+        error={rejectionReasonError}
+        onReasonChange={(reason) => {
+          setRejectionReason(reason);
+          if (rejectionReasonError) setRejectionReasonError("");
+        }}
+        onConfirm={confirmReasonAction}
+        onCancel={() => {
+          setReasonAction(null);
+          setRejectionReason("");
+          setRejectionReasonError("");
+        }}
       />
     </div>
   );

@@ -34,7 +34,7 @@ import {
 import InventoryReports from "./pages/InventoryReports.jsx";
 import ManufacturingSalesReports from "./pages/ManufacturingSalesReports.jsx";
 import { ManufacturingDashboard, ManufacturingListPage, ManufacturingFormPage, BomFormPage, WorkOrderFormPage, WipManagement } from "./pages/Manufacturing.jsx";
-import { SalesListPage, SalesFormPage, CustomerProfilePage } from "./pages/Sales.jsx";
+import { CreateBillPage, SalesListPage, SalesFormPage, CustomerProfilePage } from "./pages/Sales.jsx";
 
 const specialAdminTabs = [
   { label: "Dashboard", to: "/dashboard", icon: LayoutDashboard },
@@ -260,8 +260,8 @@ function BusinessDataProviders({ storageScope, children }) {
 
   return (
     <MasterDataProvider storageScope={storageScope} token={session?.token}>
-      <PurchaseDataProvider storageScope={storageScope}>
-        <StockDataProvider storageScope={storageScope}>
+      <PurchaseDataProvider storageScope={storageScope} token={session?.token}>
+        <StockDataProvider storageScope={storageScope} token={session?.token}>
           <ManufacturingDataProvider storageScope={storageScope}>
             <SalesDataProvider storageScope={storageScope}>
               <ReportConfigProvider storageScope={storageScope}>{children}</ReportConfigProvider>
@@ -379,6 +379,8 @@ function Shell() {
             <Route path="/sales/customer-management/new" element={<CustomerProfilePage mode="create" />} />
             <Route path="/sales/customer-management/:id/edit" element={<CustomerProfilePage mode="edit" />} />
             <Route path="/sales/customer-management/:id/view" element={<CustomerProfilePage mode="view" />} />
+
+            <Route path="/sales/create-bill" element={<CreateBillPage />} />
 
             <Route path="/sales/sales-order" element={<SalesListPage entityKey="sales-order" />} />
             <Route path="/sales/sales-order/new" element={<SalesFormPage entityKey="sales-order" mode="create" />} />

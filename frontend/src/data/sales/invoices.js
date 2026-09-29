@@ -42,7 +42,7 @@ export const invoiceRows = [
     id: "INV-2026-0001",
     date: "2026-07-14",
     invoiceType: "Tax Invoice",
-    salesOrderId: "SO-2026-0001",
+    salesOrderId: "IN-2607-0001",
     dispatchId: "DSP-2026-0001",
     deliveryChallanRef: "DSP-2026-0001",
     customerId: "CUST-1001",

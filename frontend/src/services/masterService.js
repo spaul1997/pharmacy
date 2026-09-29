@@ -1,6 +1,30 @@
 import { apiRequest } from "../lib/api.js";
 
 export const masterApiEntities = {
+  "generic-composition": {
+    path: "/master/generic-compositions",
+    label: "generic compositions",
+  },
+  "brand-name": {
+    path: "/master/brand-names",
+    label: "brand names",
+  },
+  manufacturer: {
+    path: "/master/manufacturers",
+    label: "manufacturers",
+  },
+  "customer-type": {
+    path: "/master/customer-types",
+    label: "customer types",
+  },
+  "tax-gst": {
+    path: "/master/tax-rates",
+    label: "GST rates",
+  },
+  "payment-mode": {
+    path: "/master/payment-modes",
+    label: "payment modes",
+  },
   "product-item": {
     path: "/master/product-items",
     label: "product items",
@@ -24,6 +48,14 @@ export const masterApiEntities = {
   department: {
     path: "/master/departments",
     label: "departments",
+  },
+  "warehouse-type": {
+    path: "/master/warehouse-types",
+    label: "warehouse types",
+  },
+  "location-type": {
+    path: "/master/location-types",
+    label: "location types",
   },
   warehouse: {
     path: "/master/warehouses",

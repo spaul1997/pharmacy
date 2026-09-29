@@ -107,14 +107,18 @@ export function SalesList({ entityKey }) {
       result = result.filter((row) => entity.list.searchKeys.some((key) => String(row[key] ?? "").toLowerCase().includes(q)));
     }
     Object.entries(filters).forEach(([key, value]) => {
-      if (value) result = result.filter((row) => String(row[key]) === value);
+      if (value) {
+        result = result.filter((row) =>
+          String(row[key] ?? (entityKey === "sales-order" && key === "source" ? "Sales Order" : "")) === value
+        );
+      }
     });
     if (entity.list.dateKey) {
-      if (dateFrom) result = result.filter((row) => row[entity.list.dateKey] >= dateFrom);
-      if (dateTo) result = result.filter((row) => row[entity.list.dateKey] <= dateTo);
+      if (dateFrom) result = result.filter((row) => String(row[entity.list.dateKey] || "").slice(0, 10) >= dateFrom);
+      if (dateTo) result = result.filter((row) => String(row[entity.list.dateKey] || "").slice(0, 10) <= dateTo);
     }
     return result;
-  }, [rows, search, filters, dateFrom, dateTo, entity.list.searchKeys, entity.list.dateKey]);
+  }, [rows, search, filters, dateFrom, dateTo, entity.list.searchKeys, entity.list.dateKey, entityKey]);
 
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const pageRows = filteredRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);

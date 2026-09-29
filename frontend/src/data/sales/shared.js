@@ -39,6 +39,10 @@ export const number = new Intl.NumberFormat("en-IN");
 
 export const today = () => new Date().toISOString().slice(0, 10);
 export const now = () => new Date().toISOString().slice(0, 16);
+export const localDateTimeNow = () => {
+  const date = new Date();
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+};
 
 /** Per-line GST split: CGST+SGST when intrastate, IGST when interstate. */
 export function computeLineTax(line, isIntrastate) {
@@ -114,6 +118,27 @@ export function nextId(rows, idKey, fallbackId) {
   });
   if (!bestPrefix) return fallbackId;
   return `${bestPrefix}${String(bestNum + 1).padStart(bestWidth, "0")}`;
+}
+
+/** Generates a monthly document number such as IN-2609-0001. */
+export function nextMonthlyId(rows, idKey, prefix, dateValue = today()) {
+  const dateText = String(dateValue);
+  const dateMatch = dateText.match(/^(\d{4})-(\d{2})/);
+  const date = dateMatch ? null : new Date(dateValue);
+  const year = dateMatch ? dateMatch[1] : String(date.getFullYear());
+  const month = dateMatch ? dateMatch[2] : String(date.getMonth() + 1).padStart(2, "0");
+  const idPrefix = `${prefix}-${year.slice(-2)}${month}-`;
+  let highest = 0;
+
+  (rows || []).forEach((row) => {
+    const id = String(row[idKey] || "");
+    if (!id.startsWith(idPrefix)) return;
+    const sequence = id.slice(idPrefix.length);
+    if (!/^\d+$/.test(sequence)) return;
+    highest = Math.max(highest, Number(sequence));
+  });
+
+  return `${idPrefix}${String(highest + 1).padStart(4, "0")}`;
 }
 
 /**

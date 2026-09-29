@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import {
   ArrowDownCircle,
   ArrowLeftRight,
@@ -12,18 +12,42 @@ import {
   Scale,
   SlidersHorizontal,
 } from "lucide-react";
-import { stockEntities, materialByCode, warehouses } from "../data/stockManagement.js";
-import { purchaseOrders } from "../data/purchaseManagement.js";
+import { stockEntities, stockEntityOrder } from "../data/stockManagement.js";
 import { StockSidebar } from "../components/stock/StockSidebar.jsx";
 import { StockList } from "../components/stock/StockList.jsx";
 import { StockForm } from "../components/stock/StockForm.jsx";
 import { useStockData } from "../components/stock/StockDataContext.jsx";
 import { useMasterData } from "../components/master/MasterDataContext.jsx";
+import { usePurchaseData } from "../components/purchase/PurchaseDataContext.jsx";
 import { Badge, Metric, Panel } from "../components/ui.jsx";
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const today = () => new Date().toISOString().slice(0, 10);
 const icons = { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, SlidersHorizontal, ClipboardCheck };
+
+function itemUnit(item) {
+  return item?.unit || item?.baseUnit || item?.purchaseUnit || "";
+}
+
+function itemPrice(item) {
+  return Number(item?.purchasePrice ?? item?.lastPurchasePrice ?? item?.standardCost ?? item?.price ?? item?.sellingPrice) || 0;
+}
+
+function activeWarehouseNames(masterData) {
+  return [
+    ...new Set(
+      masterData
+        .getRows("warehouse")
+        .filter((warehouse) => warehouse.status !== "Inactive")
+        .map((warehouse) => warehouse.name || warehouse.storeName || warehouse.code)
+        .filter(Boolean)
+    ),
+  ];
+}
+
+function batchDetailPath(batch) {
+  return `/stock-management/batch-lot-tracking/${encodeURIComponent(batch.id)}?warehouse=${encodeURIComponent(batch.warehouse || "")}`;
+}
 
 function deriveBatchStatus(batch, todayStr) {
   if (batch.status === "Blocked" || batch.status === "Consumed") return batch.status;
@@ -36,10 +60,14 @@ function deriveBatchStatus(batch, todayStr) {
 }
 
 function StockLayout({ children }) {
+  const { error } = useStockData();
   return (
     <div className="flex flex-col gap-5 lg:flex-row">
       <StockSidebar />
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0 flex-1">
+        {error && <div className="mb-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
+        {children}
+      </div>
     </div>
   );
 }
@@ -47,15 +75,15 @@ function StockLayout({ children }) {
 export function StockManagementDashboard() {
   const stockData = useStockData();
   const masterData = useMasterData();
-  const rawMaterials = masterData.getRows("raw-material");
+  const items = masterData.getRows("product-item").filter((item) => item.status !== "Inactive");
   const todayStr = today();
 
-  const totalQty = rawMaterials.reduce((sum, m) => sum + stockData.getTotalStock(m.code), 0);
-  const totalValue = rawMaterials.reduce((sum, m) => sum + stockData.getTotalStock(m.code) * (materialByCode(m.code)?.price || 0), 0);
+  const totalQty = items.reduce((sum, m) => sum + stockData.getTotalStock(m.code), 0);
+  const totalValue = items.reduce((sum, item) => sum + stockData.getTotalStock(item.code) * itemPrice(item), 0);
   const stockInToday = stockData.movements.filter((m) => m.date === todayStr && (m.type === "Stock In" || m.type === "Purchase")).length;
   const stockOutToday = stockData.movements.filter((m) => m.date === todayStr && m.type === "Stock Out").length;
   const pendingTransfers = stockData.getRows("stock-transfer").filter((t) => ["Pending Approval", "In Transit"].includes(t.status)).length;
-  const lowStockItems = rawMaterials.filter((m) => stockData.getTotalStock(m.code) < 100).length;
+  const lowStockItems = items.filter((m) => stockData.getTotalStock(m.code) < 100).length;
   const underAdjustment = stockData.getRows("stock-adjustment").filter((a) => a.status === "Pending Approval").length;
   const expiringBatches = stockData.batches.filter((b) => ["Near Expiry", "Expired"].includes(deriveBatchStatus(b, todayStr))).length;
 
@@ -72,12 +100,6 @@ export function StockManagementDashboard() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Link to="/stock-management/stock-in/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
-              <Plus size={15} /> Stock In
-            </Link>
-            <Link to="/stock-management/stock-out/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
-              <Plus size={15} /> Stock Out
-            </Link>
             <Link to="/stock-management/stock-transfer/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
               <Plus size={15} /> Stock Transfer
             </Link>
@@ -92,12 +114,12 @@ export function StockManagementDashboard() {
 
         <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Metric label="Total Stock Quantity" value={totalQty.toLocaleString("en-IN")} sub="Across all warehouses" icon={Layers} tone="primary" />
-          <Metric label="Total Stock Value" value={money.format(totalValue)} sub="Raw material inventory" icon={Scale} tone="success" trend={{ direction: "up", value: "3.1%" }} />
+          <Metric label="Total Stock Value" value={money.format(totalValue)} sub="Medicine inventory" icon={Scale} tone="success" trend={{ direction: "up", value: "3.1%" }} />
           <Metric label="Stock In Today" value={stockInToday} sub="Movements posted today" icon={ArrowDownCircle} tone="primary" />
           <Metric label="Stock Out Today" value={stockOutToday} sub="Movements posted today" icon={ArrowUpCircle} tone="accent" />
           <Metric label="Pending Transfers" value={pendingTransfers} sub="Awaiting approval or in transit" icon={ArrowLeftRight} tone="warning" />
-          <Metric label="Low Stock Items" value={lowStockItems} sub="Below 100 units on hand" icon={SlidersHorizontal} tone="danger" />
-          <Metric label="Items Under Adjustment" value={underAdjustment} sub="Pending approval" icon={ClipboardCheck} tone="warning" />
+          <Metric label="Low Stock Medicines" value={lowStockItems} sub="Below 100 units on hand" icon={SlidersHorizontal} tone="danger" />
+          <Metric label="Medicines Under Adjustment" value={underAdjustment} sub="Pending approval" icon={ClipboardCheck} tone="warning" />
           <Metric label="Expiring Batches" value={expiringBatches} sub="Near expiry or expired" icon={Layers} tone="danger" />
         </section>
 
@@ -117,7 +139,7 @@ export function StockManagementDashboard() {
                     <th className="py-3">Transaction No</th>
                     <th>Date</th>
                     <th>Type</th>
-                    <th>Item</th>
+                    <th>Medicine</th>
                     <th>Warehouse</th>
                     <th className="pr-4 text-right">Quantity</th>
                     <th>Reference</th>
@@ -130,7 +152,7 @@ export function StockManagementDashboard() {
                       <td className="py-3 font-mono text-xs">{m.id}</td>
                       <td>{m.date}</td>
                       <td>{m.type}</td>
-                      <td>{materialByCode(m.item)?.name || m.item}</td>
+                      <td>{items.find((item) => item.code === m.item)?.name || m.item}</td>
                       <td>{m.warehouse}</td>
                       <td className={`pr-4 text-right font-medium ${m.qtyIn ? "text-emerald-700" : "text-[var(--danger)]"}`}>
                         {m.qtyIn ? `+${m.qtyIn}` : `-${m.qtyOut}`}
@@ -151,7 +173,7 @@ export function StockManagementDashboard() {
 
 export function StockManagementListPage() {
   const { entity } = useParams();
-  if (!stockEntities[entity]) return <Navigate to="/stock-management" replace />;
+  if (!stockEntities[entity] || !stockEntityOrder.includes(entity)) return <Navigate to="/stock-management" replace />;
   return (
     <StockLayout>
       <StockList entityKey={entity} />
@@ -161,7 +183,7 @@ export function StockManagementListPage() {
 
 export function StockManagementFormPage({ mode }) {
   const { entity, id } = useParams();
-  if (!stockEntities[entity]) return <Navigate to="/stock-management" replace />;
+  if (!stockEntities[entity] || !stockEntityOrder.includes(entity)) return <Navigate to="/stock-management" replace />;
   return (
     <StockLayout>
       <StockForm entityKey={entity} mode={mode} recordId={id} />
@@ -171,6 +193,8 @@ export function StockManagementFormPage({ mode }) {
 
 export function BatchLotTracking() {
   const stockData = useStockData();
+  const masterData = useMasterData();
+  const warehouses = [...new Set([...activeWarehouseNames(masterData), ...stockData.batches.map((batch) => batch.warehouse).filter(Boolean)])];
   const todayStr = today();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
@@ -224,7 +248,7 @@ export function BatchLotTracking() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search batch number or item..."
+              placeholder="Search batch number or medicine..."
               className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100"
             />
             <select value={warehouseFilter} onChange={(e) => setWarehouseFilter(e.target.value)} className="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm">
@@ -249,7 +273,7 @@ export function BatchLotTracking() {
               <thead className="border-b border-[var(--line)] text-xs uppercase text-[var(--muted)]">
                 <tr>
                   <th className="py-3 pl-4">Batch No</th>
-                  <th>Item</th>
+                  <th>Medicine</th>
                   <th>Mfg Date</th>
                   <th>Expiry Date</th>
                   <th className="pr-6 text-right">Quantity</th>
@@ -260,9 +284,9 @@ export function BatchLotTracking() {
               </thead>
               <tbody>
                 {filtered.map((b) => (
-                  <tr key={b.id} className="border-b border-slate-100 hover:bg-slate-50/60">
+                  <tr key={`${b.id}-${b.code}-${b.warehouse}`} className="border-b border-slate-100 hover:bg-slate-50/60">
                     <td className="py-3 pl-4">
-                      <Link to={`/stock-management/batch-lot-tracking/${b.id}`} className="font-mono text-xs font-medium text-[var(--primary)] hover:underline">
+                      <Link to={batchDetailPath(b)} className="font-mono text-xs font-medium text-[var(--primary)] hover:underline">
                         {b.id}
                       </Link>
                     </td>
@@ -297,14 +321,17 @@ const batchDetailTabs = ["Overview", "Stock Movement", "Quality", "Documents"];
 
 export function BatchDetail() {
   const { batchId } = useParams();
+  const [searchParams] = useSearchParams();
   const stockData = useStockData();
+  const masterData = useMasterData();
   const [tab, setTab] = useState("Overview");
-  const batch = stockData.batches.find((b) => b.id === batchId);
+  const warehouse = searchParams.get("warehouse") || "";
+  const batch = stockData.batches.find((b) => b.id === batchId && (!warehouse || b.warehouse === warehouse));
 
   if (!batch) return <Navigate to="/stock-management/batch-lot-tracking" replace />;
   const status = deriveBatchStatus(batch, today());
-  const movements = stockData.movements.filter((m) => m.batch === batch.id);
-  const material = materialByCode(batch.code);
+  const movements = stockData.movements.filter((m) => m.batch === batch.id && (!warehouse || m.warehouse === warehouse));
+  const material = masterData.getRows("product-item").find((item) => item.code === batch.code);
 
   return (
     <StockLayout>
@@ -341,12 +368,12 @@ export function BatchDetail() {
           <div className="p-4 sm:p-5">
             {tab === "Overview" && (
               <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
-                <InfoRow label="Item" value={<Link to={`/stock-management/item/${batch.code}`} className="text-[var(--primary)] hover:underline">{batch.item}</Link>} />
-                <InfoRow label="Item Code" value={batch.code} />
+                <InfoRow label="Medicine" value={<Link to={`/stock-management/item/${batch.code}`} className="text-[var(--primary)] hover:underline">{batch.item}</Link>} />
+                <InfoRow label="Medicine Code" value={batch.code} />
                 <InfoRow label="Batch Number" value={batch.id} />
                 <InfoRow label="Manufacturing Date" value={batch.mfgDate} />
                 <InfoRow label="Expiry Date" value={batch.expiryDate || "N/A"} />
-                <InfoRow label="Current Quantity" value={`${batch.qty} ${material?.unit || ""}`} />
+                <InfoRow label="Current Quantity" value={`${batch.qty} ${itemUnit(material)}`} />
                 <InfoRow label="Warehouse" value={batch.warehouse} />
                 <InfoRow label="Location" value={batch.location} />
                 <InfoRow label="Supplier" value={batch.supplier} />
@@ -411,8 +438,8 @@ export function StockItemDetail() {
   const { code } = useParams();
   const stockData = useStockData();
   const masterData = useMasterData();
-  const material = masterData.getRows("raw-material").find((m) => m.code === code);
-  const info = materialByCode(code);
+  const purchaseData = usePurchaseData();
+  const material = masterData.getRows("product-item").find((m) => m.code === code);
 
   if (!material) return <Navigate to="/stock-management" replace />;
 
@@ -420,9 +447,12 @@ export function StockItemDetail() {
   const total = stockData.getTotalStock(code);
   const batches = stockData.batches.filter((b) => b.code === code);
   const movements = stockData.movements.filter((m) => m.item === code).slice(0, 10);
-  const onOrder = purchaseOrders
+  const onOrder = purchaseData
+    .getRows("purchase-order")
     .filter((po) => !["Received", "Cancelled"].includes(po.status))
-    .reduce((sum, po) => sum + po.items.filter((i) => i.code === code).reduce((s, i) => s + (Number(i.qty) || 0), 0), 0);
+    .reduce((sum, po) => sum + (po.items || []).filter((i) => i.code === code).reduce((s, i) => s + (Number(i.qty) || 0), 0), 0);
+
+  const unit = itemUnit(material);
 
   return (
     <StockLayout>
@@ -438,10 +468,10 @@ export function StockItemDetail() {
         <p className="mt-0.5 font-mono text-xs text-[var(--muted)]">{code}</p>
 
         <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Metric label="Current Stock" value={`${total} ${material.unit}`} icon={Layers} tone="primary" />
-          <Metric label="Available Stock" value={`${total} ${material.unit}`} sub="Not reserved" icon={ArrowDownCircle} tone="success" />
-          <Metric label="On Order" value={`${onOrder} ${material.unit}`} sub="Open purchase orders" icon={ArrowLeftRight} tone="accent" />
-          <Metric label="Stock Value" value={money.format(total * (info?.price || 0))} icon={Scale} tone="warning" />
+          <Metric label="Current Stock" value={`${total} ${unit}`} icon={Layers} tone="primary" />
+          <Metric label="Available Stock" value={`${total} ${unit}`} sub="Not reserved" icon={ArrowDownCircle} tone="success" />
+          <Metric label="On Order" value={`${onOrder} ${unit}`} sub="Open purchase orders" icon={ArrowLeftRight} tone="accent" />
+          <Metric label="Stock Value" value={money.format(total * itemPrice(material))} icon={Scale} tone="warning" />
         </div>
 
         <div className="mt-5 grid gap-5 xl:grid-cols-2">
@@ -487,9 +517,9 @@ export function StockItemDetail() {
               </thead>
               <tbody>
                 {batches.map((b) => (
-                  <tr key={b.id} className="border-b border-slate-100">
+                  <tr key={`${b.id}-${b.code}-${b.warehouse}`} className="border-b border-slate-100">
                     <td className="py-2">
-                      <Link to={`/stock-management/batch-lot-tracking/${b.id}`} className="font-mono text-xs text-[var(--primary)] hover:underline">
+                      <Link to={batchDetailPath(b)} className="font-mono text-xs text-[var(--primary)] hover:underline">
                         {b.id}
                       </Link>
                     </td>
@@ -503,7 +533,7 @@ export function StockItemDetail() {
                 {batches.length === 0 && (
                   <tr>
                     <td colSpan={4} className="py-4 text-center text-[var(--muted)]">
-                      No batches for this item.
+                      No batches for this medicine.
                     </td>
                   </tr>
                 )}
@@ -549,6 +579,9 @@ export function StockItemDetail() {
 
 export function StockMovementHistory() {
   const stockData = useStockData();
+  const masterData = useMasterData();
+  const items = masterData.getRows("product-item");
+  const warehouses = [...new Set([...activeWarehouseNames(masterData), ...stockData.movements.map((movement) => movement.warehouse).filter(Boolean)])];
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [warehouseFilter, setWarehouseFilter] = useState("");
@@ -556,7 +589,8 @@ export function StockMovementHistory() {
   const filtered = stockData.movements.filter((m) => {
     if (search.trim()) {
       const q = search.trim().toLowerCase();
-      if (!m.reference.toLowerCase().includes(q) && !(materialByCode(m.item)?.name || "").toLowerCase().includes(q)) return false;
+      const itemName = items.find((item) => item.code === m.item)?.name || "";
+      if (!String(m.reference || "").toLowerCase().includes(q) && !itemName.toLowerCase().includes(q)) return false;
     }
     if (typeFilter && m.type !== typeFilter) return false;
     if (warehouseFilter && m.warehouse !== warehouseFilter) return false;
@@ -564,9 +598,9 @@ export function StockMovementHistory() {
   });
 
   function handleExport() {
-    const header = "Date,Transaction No,Type,Item,Batch,Warehouse,In,Out,Balance,User";
+    const header = "Date,Transaction No,Type,Medicine,Batch,Warehouse,In,Out,Balance,User";
     const lines = filtered.map((m) =>
-      [m.date, m.id, m.type, materialByCode(m.item)?.name || m.item, m.batch, m.warehouse, m.qtyIn, m.qtyOut, m.balance, m.user].join(",")
+      [m.date, m.id, m.type, items.find((item) => item.code === m.item)?.name || m.item, m.batch, m.warehouse, m.qtyIn, m.qtyOut, m.balance, m.user].join(",")
     );
     const blob = new Blob([[header, ...lines].join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
@@ -607,7 +641,7 @@ export function StockMovementHistory() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search item or reference..."
+              placeholder="Search medicine or reference..."
               className="min-w-[220px] flex-1 rounded-md border border-[var(--line)] px-3 py-2 text-sm outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100"
             />
             <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm">
@@ -634,7 +668,7 @@ export function StockMovementHistory() {
                   <th className="py-3 pl-4">Date</th>
                   <th>Transaction No</th>
                   <th>Type</th>
-                  <th>Item</th>
+                  <th>Medicine</th>
                   <th>Batch</th>
                   <th>Warehouse</th>
                   <th className="text-right">In</th>
@@ -649,7 +683,7 @@ export function StockMovementHistory() {
                     <td className="py-3 pl-4">{m.date}</td>
                     <td className="font-mono text-xs">{m.id}</td>
                     <td>{m.type}</td>
-                    <td>{materialByCode(m.item)?.name || m.item}</td>
+                    <td>{items.find((item) => item.code === m.item)?.name || m.item}</td>
                     <td className="font-mono text-xs">{m.batch || "—"}</td>
                     <td>{m.warehouse}</td>
                     <td className="text-right text-emerald-700">{m.qtyIn || ""}</td>
@@ -675,12 +709,12 @@ export function StockMovementHistory() {
 }
 
 const reportCards = [
-  { key: "stock-summary", label: "Stock Summary", description: "Total quantity and value by item." },
+  { key: "stock-summary", label: "Stock Summary", description: "Total quantity and value by medicine." },
   { key: "warehouse-stock", label: "Warehouse Stock", description: "Stock on hand grouped by warehouse." },
   { key: "movement", label: "Stock Movement", description: "Full movement ledger with filters.", to: "/stock-management/movements" },
   { key: "batch", label: "Batch / Lot Report", description: "All batches with expiry status.", to: "/stock-management/batch-lot-tracking" },
   { key: "expiry", label: "Expiry Report", description: "Batches expiring within 30 days." },
-  { key: "valuation", label: "Stock Valuation", description: "Inventory value by item at current cost." },
+  { key: "valuation", label: "Stock Valuation", description: "Inventory value by medicine at current cost." },
 ];
 
 export function StockReports() {
@@ -688,30 +722,30 @@ export function StockReports() {
   const masterData = useMasterData();
   const [active, setActive] = useState("stock-summary");
   const todayStr = today();
-  const rawMaterials = masterData.getRows("raw-material");
+  const items = masterData.getRows("product-item").filter((item) => item.status !== "Inactive");
 
   const stockSummaryRows = useMemo(
     () =>
-      rawMaterials.map((m) => ({
+      items.map((m) => ({
         code: m.code,
         name: m.name,
-        unit: m.unit,
+        unit: itemUnit(m),
         qty: stockData.getTotalStock(m.code),
-        value: stockData.getTotalStock(m.code) * (materialByCode(m.code)?.price || 0),
+        value: stockData.getTotalStock(m.code) * itemPrice(m),
       })),
-    [rawMaterials, stockData]
+    [items, stockData]
   );
 
   const warehouseRows = useMemo(() => {
     const rows = [];
-    rawMaterials.forEach((m) => {
+    items.forEach((m) => {
       const breakdown = stockData.getWarehouseBreakdown(m.code);
       Object.entries(breakdown).forEach(([wh, qty]) => {
-        if (qty > 0) rows.push({ warehouse: wh, code: m.code, name: m.name, qty, unit: m.unit });
+        if (qty > 0) rows.push({ warehouse: wh, code: m.code, name: m.name, qty, unit: itemUnit(m) });
       });
     });
     return rows;
-  }, [rawMaterials, stockData]);
+  }, [items, stockData]);
 
   const expiryRows = useMemo(
     () =>
@@ -770,8 +804,8 @@ export function StockReports() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-[var(--line)] text-xs uppercase text-[var(--muted)]">
                 <tr>
-                  <th className="py-2">Item Code</th>
-                  <th>Item</th>
+                  <th className="py-2">Medicine Code</th>
+                  <th>Medicine</th>
                   <th className="pr-4 text-right">Quantity</th>
                   <th className="text-right">Value</th>
                 </tr>
@@ -799,8 +833,8 @@ export function StockReports() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-[var(--line)] text-xs uppercase text-[var(--muted)]">
                 <tr>
-                  {active === "warehouse-stock" ? <th className="py-2">Warehouse</th> : <th className="py-2">Item Code</th>}
-                  <th>Item</th>
+                  {active === "warehouse-stock" ? <th className="py-2">Warehouse</th> : <th className="py-2">Medicine Code</th>}
+                  <th>Medicine</th>
                   <th className="pr-4 text-right">Quantity</th>
                   {active === "valuation" && <th className="text-right">Value</th>}
                 </tr>
@@ -825,7 +859,7 @@ export function StockReports() {
               <thead className="border-b border-[var(--line)] text-xs uppercase text-[var(--muted)]">
                 <tr>
                   <th className="py-2">Batch</th>
-                  <th>Item</th>
+                  <th>Medicine</th>
                   <th>Expiry Date</th>
                   <th className="pr-4 text-right">Quantity</th>
                   <th>Status</th>
@@ -833,9 +867,9 @@ export function StockReports() {
               </thead>
               <tbody>
                 {expiryRows.map((b) => (
-                  <tr key={b.id} className="border-b border-slate-100">
+                  <tr key={`${b.id}-${b.code}-${b.warehouse}`} className="border-b border-slate-100">
                     <td className="py-2">
-                      <Link to={`/stock-management/batch-lot-tracking/${b.id}`} className="font-mono text-xs text-[var(--primary)] hover:underline">
+                      <Link to={batchDetailPath(b)} className="font-mono text-xs text-[var(--primary)] hover:underline">
                         {b.id}
                       </Link>
                     </td>

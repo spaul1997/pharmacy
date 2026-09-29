@@ -19,6 +19,19 @@ import {
   updateMasterRow,
   updateProductItem,
 } from "../controllers/master.controller.js";
+import {
+  createPurchaseDocument,
+  deletePurchaseDocument,
+  listPurchaseDocuments,
+  updatePurchaseDocument,
+} from "../controllers/purchaseManagement.controller.js";
+import {
+  createStockDocument,
+  getStockState,
+  listStockDocuments,
+  updateStockDocument,
+  updateStockState,
+} from "../controllers/stockManagement.controller.js";
 
 const router = Router();
 
@@ -358,6 +371,24 @@ router.get("/master/:masterEntity", requireAuth, requireCompanyUser, listMasterR
 router.post("/master/:masterEntity", requireAuth, requireCompanyUser, createMasterRow);
 
 router.put("/master/:masterEntity/:code", requireAuth, requireCompanyUser, updateMasterRow);
+
+router.get("/purchase-management/:entityKey", requireAuth, requireCompanyUser, listPurchaseDocuments);
+
+router.post("/purchase-management/:entityKey", requireAuth, requireCompanyUser, createPurchaseDocument);
+
+router.put("/purchase-management/:entityKey/:id", requireAuth, requireCompanyUser, updatePurchaseDocument);
+
+router.delete("/purchase-management/:entityKey/:id", requireAuth, requireCompanyUser, deletePurchaseDocument);
+
+router.get("/stock-management/state", requireAuth, requireCompanyUser, getStockState);
+
+router.put("/stock-management/state", requireAuth, requireCompanyUser, updateStockState);
+
+router.get("/stock-management/documents/:entityKey", requireAuth, requireCompanyUser, listStockDocuments);
+
+router.post("/stock-management/documents/:entityKey", requireAuth, requireCompanyUser, createStockDocument);
+
+router.put("/stock-management/documents/:entityKey/:id", requireAuth, requireCompanyUser, updateStockDocument);
 
 router.get("/saas-admin/dashboard", requireSpecialAdmin, async (req, res, next) => {
   try {

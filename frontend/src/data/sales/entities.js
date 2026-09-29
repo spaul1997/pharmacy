@@ -23,6 +23,7 @@ export const genericFormEntityKeys = ["sales-order", "product-allocation", "deli
 
 export const salesNav = [
   { to: "/sales/customer-management", label: "Customer Management", icon: "Users" },
+  { to: "/sales/create-bill", label: "Create Bill", icon: "ReceiptIndianRupee" },
   { to: "/sales/sales-order", label: "Sales Order", icon: "FileText" },
   { to: "/sales/product-allocation", label: "Product Allocation", icon: "PackageCheck" },
   { to: "/sales/delivery-dispatch", label: "Delivery / Dispatch", icon: "Truck" },

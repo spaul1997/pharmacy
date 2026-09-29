@@ -1,16 +1,11 @@
 import React, { useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
-import { FileText, IndianRupee, PackageCheck, Plus, ShoppingCart, Undo2 } from "lucide-react";
+import { FileText, IndianRupee, PackageCheck, Plus, Send, ShoppingCart, Undo2 } from "lucide-react";
 import {
-  purchaseRequests,
-  purchaseOrders,
-  goodsReceipts,
-  purchaseReturns,
+  formatDisplayDate,
   purchaseEntities,
   poTotals,
-  materialByCode,
 } from "../data/purchaseManagement.js";
-import { PurchaseSidebar } from "../components/purchase/PurchaseSidebar.jsx";
 import { PurchaseList } from "../components/purchase/PurchaseList.jsx";
 import { PurchaseForm } from "../components/purchase/PurchaseForm.jsx";
 import { WorkflowTimeline } from "../components/purchase/WorkflowTimeline.jsx";
@@ -19,14 +14,10 @@ import { Badge, Metric, Panel } from "../components/ui.jsx";
 import { usePurchaseData } from "../components/purchase/PurchaseDataContext.jsx";
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
+const editLockedStatuses = ["Approved", "Rejected", "Ordered", "Partially Received", "Completed GRN", "Received", "Returned", "Cancelled", "Completed"];
 
 function PurchaseLayout({ children }) {
-  return (
-    <div className="flex flex-col gap-5 lg:flex-row">
-      <PurchaseSidebar />
-      <div className="min-w-0 flex-1">{children}</div>
-    </div>
-  );
+  return <div className="min-w-0 w-full">{children}</div>;
 }
 
 export function PurchaseManagementDashboard() {
@@ -34,11 +25,13 @@ export function PurchaseManagementDashboard() {
   const requests = getRows("purchase-request");
   const orders = getRows("purchase-order");
   const receipts = getRows("goods-receipt");
+  const issues = getRows("purchase-issue");
   const returns = getRows("purchase-return");
 
   const pendingRequests = requests.filter((r) => r.status === "Pending Approval").length;
   const openOrders = orders.filter((r) => ["Approved", "Ordered", "Partially Received"].includes(r.status)).length;
   const awaitingReceipt = receipts.filter((r) => r.status === "Pending Inspection").length;
+  const activeIssues = issues.filter((r) => ["Issue Incomplete", "Pending Approval", "Approved"].includes(r.status)).length;
   const activeReturns = returns.filter((r) => ["Pending Approval", "Approved"].includes(r.status)).length;
   const totalValue = orders.reduce((sum, po) => sum + poTotals(po.items).grandTotal, 0);
 
@@ -51,12 +44,12 @@ export function PurchaseManagementDashboard() {
           <div>
             <h2 className="text-xl font-semibold text-[var(--ink)]">Purchase Management</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">
-              Manage purchase requests, supplier orders, goods receipts and purchase returns.
+              Manage medicine requests, supplier orders, goods receipts and purchase returns.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Link to="/purchase-management/purchase-request/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
-              <Plus size={15} /> Medicine Requisition
+              <Plus size={15} /> Medicine Request
             </Link>
             <Link to="/purchase-management/purchase-order/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
               <Plus size={15} /> Purchase Order
@@ -64,16 +57,20 @@ export function PurchaseManagementDashboard() {
             <Link to="/purchase-management/goods-receipt/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
               <Plus size={15} /> Goods Receipt
             </Link>
+            <Link to="/purchase-management/purchase-issue/new" className="flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
+              <Plus size={15} /> Purchase Issue
+            </Link>
             <Link to="/purchase-management/purchase-return/new" className="flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-3 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
               <Plus size={15} /> Purchase Return
             </Link>
           </div>
         </div>
 
-        <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-          <Metric label="Pending Requisitions" value={pendingRequests} icon={FileText} tone="warning" />
+        <section className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+          <Metric label="Pending Medicine Requests" value={pendingRequests} icon={FileText} tone="warning" />
           <Metric label="Open Purchase Orders" value={openOrders} icon={ShoppingCart} tone="primary" />
           <Metric label="Goods Awaiting Receipt" value={awaitingReceipt} icon={PackageCheck} tone="accent" />
+          <Metric label="Purchase Issues" value={activeIssues} icon={Send} tone="primary" />
           <Metric label="Purchase Returns" value={activeReturns} icon={Undo2} tone="danger" />
           <Metric label="Total Purchase Value" value={money.format(totalValue)} icon={IndianRupee} tone="success" trend={{ direction: "up", value: "5.8%" }} />
         </section>
@@ -86,9 +83,9 @@ export function PurchaseManagementDashboard() {
                   <tr>
                     <th className="py-3">PO Number</th>
                     <th>Supplier</th>
-                    <th>Order Date</th>
+                    <th>PO Date & Time</th>
                     <th>Expected Date</th>
-                    <th className="pr-4 text-right">Items</th>
+                    <th className="pr-4 text-right">Medicines</th>
                     <th className="pr-6 text-right">Total Amount</th>
                     <th>Status</th>
                   </tr>
@@ -102,7 +99,7 @@ export function PurchaseManagementDashboard() {
                         </Link>
                       </td>
                       <td className="font-medium">{po.supplier}</td>
-                      <td>{po.date}</td>
+                      <td>{formatDisplayDate(po.date, { includeTime: true })}</td>
                       <td>{po.expectedDate}</td>
                       <td className="pr-4 text-right">{po.items.length}</td>
                       <td className="pr-6 text-right">{money.format(poTotals(po.items).grandTotal)}</td>
@@ -135,14 +132,6 @@ export function PurchaseManagementFormPage({ mode }) {
   const { entity, id } = useParams();
   if (!purchaseEntities[entity]) return <Navigate to="/purchase-management" replace />;
 
-  if (entity === "purchase-order" && mode === "view" && id) {
-    return (
-      <PurchaseLayout>
-        <PurchaseOrderDetails id={id} />
-      </PurchaseLayout>
-    );
-  }
-
   return (
     <PurchaseLayout>
       <PurchaseForm entityKey={entity} mode={mode} recordId={id} />
@@ -150,19 +139,21 @@ export function PurchaseManagementFormPage({ mode }) {
   );
 }
 
-const detailTabs = ["Overview", "Items", "Goods Receipts", "Purchase Returns", "Payments", "Documents", "Activity Log"];
+const detailTabs = ["Overview", "Medicines", "Goods Receipts", "Purchase Issues", "Purchase Returns", "Payments", "Documents", "Activity Log"];
 
 function PurchaseOrderDetails({ id }) {
-  const { getRecord } = usePurchaseData();
+  const purchaseData = usePurchaseData();
   const [tab, setTab] = useState("Overview");
-  const po = getRecord("purchase-order", id);
+  const po = purchaseData.getRecord("purchase-order", id);
 
   if (!po) return <Navigate to="/purchase-management/purchase-order" replace />;
 
   const totals = poTotals(po.items);
-  const relatedReceipts = goodsReceipts.filter((g) => g.refPO === po.id);
-  const relatedReturns = purchaseReturns.filter((r) => r.refPO === po.id);
-  const paid = po.status === "Received" ? totals.grandTotal : po.status === "Partially Received" ? totals.grandTotal * 0.4 : 0;
+  const relatedReceipts = purchaseData.getRows("goods-receipt").filter((g) => g.refPO === po.id);
+  const relatedIssues = purchaseData.getRows("purchase-issue").filter((issue) => issue.refPO === po.id);
+  const relatedReturns = purchaseData.getRows("purchase-return").filter((r) => r.refPO === po.id);
+  const paid = ["Completed GRN", "Received"].includes(po.status) ? totals.grandTotal : po.status === "Partially Received" ? totals.grandTotal * 0.4 : 0;
+  const canEditRecord = !editLockedStatuses.includes(po.status);
 
   return (
     <div>
@@ -183,9 +174,11 @@ function PurchaseOrderDetails({ id }) {
           <button type="button" onClick={() => window.print()} className="rounded-md border border-[var(--line)] bg-white px-3.5 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
             Print
           </button>
-          <Link to={`/purchase-management/purchase-order/${po.id}/edit`} className="rounded-md bg-[var(--primary)] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
-            Edit
-          </Link>
+          {canEditRecord && (
+            <Link to={`/purchase-management/purchase-order/${po.id}/edit`} className="rounded-md bg-[var(--primary)] px-3.5 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
+              Edit
+            </Link>
+          )}
         </div>
       </div>
 
@@ -215,28 +208,32 @@ function PurchaseOrderDetails({ id }) {
                   ...(relatedReceipts[0] ? [{ label: "Goods Receipt", id: relatedReceipts[0].id, to: `/purchase-management/goods-receipt/${relatedReceipts[0].id}/view` }] : []),
                 ]}
               />
-              <WorkflowTimeline steps={["Created", "Approved", "Sent to Supplier", "Received"]} activity={po.activity} />
+              <WorkflowTimeline steps={["Created", "Approved", "Sent to Supplier", "Completed GRN"]} activity={po.activity} record={po} />
 
               <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2 lg:grid-cols-3">
                 <InfoRow label="Supplier" value={po.supplier} />
-                <InfoRow label="PO Date" value={po.date} />
+                <InfoRow label="PO Date & Time" value={formatDisplayDate(po.date, { includeTime: true })} />
                 <InfoRow label="Expected Date" value={po.expectedDate} />
                 <InfoRow label="Warehouse" value={po.warehouse} />
                 <InfoRow label="Payment Terms" value={po.paymentTerms} />
                 <InfoRow label="Delivery Terms" value={po.deliveryTerms} />
                 <InfoRow label="Prepared By" value={po.preparedBy} />
                 <InfoRow label="Approved By" value={po.approvedBy} />
+                <InfoRow label="Approval Date" value={po.approvalDate} />
+                <InfoRow label="Rejected By" value={po.rejectedBy} />
+                <InfoRow label="Rejection Date" value={po.rejectionDate} />
+                <InfoRow label="Rejection Reason" value={po.rejectionReason} />
                 <InfoRow label="Grand Total" value={money.format(totals.grandTotal)} />
               </div>
             </div>
           )}
 
-          {tab === "Items" && (
+          {tab === "Medicines" && (
             <div className="overflow-x-auto rounded-md border border-[var(--line)]">
               <table className="w-full min-w-[640px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-[var(--muted)]">
                   <tr>
-                    <th className="px-3 py-2">Item</th>
+                    <th className="px-3 py-2">Medicine</th>
                     <th className="px-3 py-2 text-right">Qty</th>
                     <th className="px-3 py-2">Unit</th>
                     <th className="px-3 py-2 text-right">Price</th>
@@ -274,7 +271,7 @@ function PurchaseOrderDetails({ id }) {
               empty="No goods receipts recorded against this PO yet."
               columns={[
                 { key: "id", label: "GRN Number", to: (r) => `/purchase-management/goods-receipt/${r.id}/view` },
-                { key: "date", label: "Receipt Date" },
+                { key: "date", label: "Receipt Date & Time" },
                 { key: "status", label: "Status", badge: true },
               ]}
             />
@@ -288,6 +285,20 @@ function PurchaseOrderDetails({ id }) {
                 { key: "id", label: "Return Number", to: (r) => `/purchase-management/purchase-return/${r.id}/view` },
                 { key: "date", label: "Return Date" },
                 { key: "reason", label: "Reason" },
+                { key: "status", label: "Status", badge: true },
+              ]}
+            />
+          )}
+
+          {tab === "Purchase Issues" && (
+            <RelatedList
+              rows={relatedIssues}
+              empty="No purchase issues raised against this PO."
+              columns={[
+                { key: "id", label: "Issue Number", to: (r) => `/purchase-management/purchase-issue/${r.id}/view` },
+                { key: "refGRN", label: "GRN Number" },
+                { key: "date", label: "DATE & TIME" },
+                { key: "issuedTo", label: "Issued To" },
                 { key: "status", label: "Status", badge: true },
               ]}
             />
@@ -400,19 +411,23 @@ function RelatedList({ rows, columns, empty }) {
         <tbody>
           {rows.map((row) => (
             <tr key={row.id} className="border-t border-slate-100">
-              {columns.map((col) => (
-                <td key={col.key} className="px-3 py-2">
-                  {col.badge ? (
-                    <Badge>{row[col.key]}</Badge>
-                  ) : col.to ? (
-                    <Link to={col.to(row)} className="font-mono text-xs font-medium text-[var(--primary)] hover:underline">
-                      {row[col.key]}
-                    </Link>
-                  ) : (
-                    row[col.key]
-                  )}
-                </td>
-              ))}
+              {columns.map((col) => {
+                const value = row[col.key];
+                const displayValue = /date/i.test(col.key) || /date/i.test(col.label) ? formatDisplayDate(value, { includeTime: /time/i.test(col.label) }) : value;
+                return (
+                  <td key={col.key} className="px-3 py-2">
+                    {col.badge ? (
+                      <Badge>{displayValue}</Badge>
+                    ) : col.to ? (
+                      <Link to={col.to(row)} className="font-mono text-xs font-medium text-[var(--primary)] hover:underline">
+                        {displayValue}
+                      </Link>
+                    ) : (
+                      displayValue
+                    )}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>

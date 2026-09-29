@@ -1,21 +1,18 @@
-// Config + sample data for the Purchase Management module. Mirrors the
+// Config for the Purchase Management module. Mirrors the
 // Master Management config pattern (list/form config driving generic
 // renderers) but adds line-item tables, cross-document references, and
-// status workflows. Reuses Master Management's supplier and raw-material
-// data so both modules stay consistent (materials procured here are the
-// same materials tracked in Master Management > Raw Material).
+// status workflows. Reuses the pharmacy supplier and medicine masters so
+// purchase documents always use the same medicines managed in Master Data.
 import { masterEntities } from "./masterManagement.js";
 
 export const suppliers = masterEntities.supplier.list.rows.map((s) => s.name);
 export const materials = masterEntities["product-item"].list.rows.map((m) => ({
   code: m.code,
   name: m.name,
+  genericName: m.genericName || "",
+  composition: m.composition || "",
   unit: m.unit,
   price: m.price,
-  currentStock: m.stock || 0,
-  minStock: m.minStock || 0,
-  reorderLevel: m.reorderLevel || 0,
-  preferredSupplier: m.preferredSupplier || "",
 }));
 export const warehouses = masterEntities.warehouse.list.rows.map((w) => w.name);
 
@@ -43,102 +40,22 @@ export function poTotals(items) {
   return { subtotal, discount, tax, grandTotal };
 }
 
-export const purchaseRequests = [
-  {
-    id: "PR-2026-001",
-    date: "2026-08-01",
-    requestedBy: "Rajesh Kumar",
-    department: "Production",
-    requiredDate: "2026-08-15",
-    priority: "High",
-    purpose: "Restock for Q3 production run",
-    items: [
-      { code: "RM-2001", name: "Mild Steel Rod 12mm", qty: 500, unit: "KG" },
-      { code: "RM-2003", name: "Copper Wire 2.5mm", qty: 200, unit: "MTR" },
-    ],
-    status: "Converted",
-    approvedBy: "Anil Deshmukh",
-    approvalDate: "2026-08-02",
-    approvalRemarks: "Approved as per production schedule.",
-    activity: [
-      { event: "Created", date: "2026-08-01", by: "Rajesh Kumar" },
-      { event: "Submitted for Approval", date: "2026-08-01", by: "Rajesh Kumar" },
-      { event: "Approved", date: "2026-08-02", by: "Anil Deshmukh" },
-      { event: "Converted", date: "2026-08-02", by: "Anil Deshmukh" },
-    ],
-  },
-  {
-    id: "PR-2026-002",
-    date: "2026-08-05",
-    requestedBy: "Priya Nair",
-    department: "Maintenance",
-    requiredDate: "2026-08-20",
-    priority: "Normal",
-    purpose: "Bearing replacement stock",
-    items: [{ code: "RM-2005", name: "Stainless Steel Sheet 2mm", qty: 100, unit: "KG" }],
-    status: "Approved",
-    approvedBy: "Anil Deshmukh",
-    approvalDate: "2026-08-06",
-    activity: [
-      { event: "Created", date: "2026-08-05", by: "Priya Nair" },
-      { event: "Submitted for Approval", date: "2026-08-05", by: "Priya Nair" },
-      { event: "Approved", date: "2026-08-06", by: "Anil Deshmukh" },
-    ],
-  },
-  {
-    id: "PR-2026-003",
-    date: "2026-08-10",
-    requestedBy: "Karan Mehta",
-    department: "Production",
-    requiredDate: "2026-08-25",
-    priority: "Urgent",
-    purpose: "Urgent shortage — line stoppage risk",
-    items: [
-      { code: "RM-2002", name: "ABS Plastic Granules", qty: 300, unit: "KG" },
-      { code: "RM-2004", name: "Industrial Adhesive", qty: 50, unit: "LTR" },
-      { code: "RM-2006", name: "Rubber Compound", qty: 80, unit: "KG" },
-    ],
-    status: "Pending Approval",
-    activity: [
-      { event: "Created", date: "2026-08-10", by: "Karan Mehta" },
-      { event: "Submitted for Approval", date: "2026-08-10", by: "Karan Mehta" },
-    ],
-  },
-  {
-    id: "PR-2026-004",
-    date: "2026-08-12",
-    requestedBy: "Sunita Rao",
-    department: "Quality",
-    requiredDate: "2026-08-18",
-    priority: "Low",
-    purpose: "Lab testing samples",
-    items: [{ code: "RM-2003", name: "Copper Wire 2.5mm", qty: 10, unit: "MTR" }],
-    status: "Rejected",
-    approvedBy: "Anil Deshmukh",
-    approvalDate: "2026-08-13",
-    approvalRemarks: "Not budgeted this quarter.",
-    activity: [
-      { event: "Created", date: "2026-08-12", by: "Sunita Rao" },
-      { event: "Submitted for Approval", date: "2026-08-12", by: "Sunita Rao" },
-      { event: "Rejected", date: "2026-08-13", by: "Anil Deshmukh" },
-    ],
-  },
-  {
-    id: "PR-2026-005",
-    date: "2026-08-14",
-    requestedBy: "Anil Deshmukh",
-    department: "Production",
-    requiredDate: "2026-09-01",
-    priority: "Normal",
-    purpose: "September production plan",
-    items: [
-      { code: "RM-2001", name: "Mild Steel Rod 12mm", qty: 400, unit: "KG" },
-      { code: "RM-2005", name: "Stainless Steel Sheet 2mm", qty: 150, unit: "KG" },
-    ],
-    status: "Draft",
-    activity: [{ event: "Created", date: "2026-08-14", by: "Anil Deshmukh" }],
-  },
-];
+export function formatDisplayDate(value, { includeTime = false } = {}) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/);
+
+  if (!match) return text.replace(/\b(am|pm)\b/gi, (suffix) => suffix.toUpperCase());
+
+  const [, year, month, day, hours, minutes] = match;
+  if (hours === undefined || minutes === undefined) return `${day}-${month}-${year}${includeTime ? " 12:00 AM" : ""}`;
+
+  const numericHours = Number(hours);
+  const displayHours = String(numericHours % 12 || 12).padStart(2, "0");
+  const meridiem = numericHours >= 12 ? "PM" : "AM";
+  return `${day}-${month}-${year} ${displayHours}:${minutes} ${meridiem}`;
+}
+
+export const purchaseRequests = [];
 
 export const purchaseOrders = [
   {
@@ -351,6 +268,8 @@ export const goodsReceipts = [
   },
 ];
 
+export const purchaseIssues = [];
+
 export const purchaseReturns = [
   {
     id: "RET-2026-011",
@@ -400,35 +319,35 @@ export const purchaseReturns = [
 
 export { materialByCode };
 
-const PR_STATUSES = ["Draft", "Pending Approval", "Approved", "Rejected", "Converted", "Cancelled"];
-const PO_STATUSES = ["Draft", "Pending Approval", "Approved", "Ordered", "Partially Received", "Received", "Cancelled", "Returned"];
+const PR_STATUSES = ["Draft", "Pending Approval", "Approved", "Partial Issue", "Full Issue", "Rejected", "Received", "Cancelled"];
+const PO_STATUSES = ["Draft", "Pending Approval", "Approved", "Rejected", "Ordered", "Partially Received", "Completed GRN", "Received", "Cancelled", "Returned"];
 const GRN_STATUSES = ["Draft", "Pending Inspection", "Accepted", "Partially Accepted", "Rejected", "Completed"];
-const RETURN_STATUSES = ["Draft", "Pending Approval", "Approved", "Returned", "Cancelled"];
-const PRIORITIES = ["Normal", "Urgent", "Emergency"];
-const RETURN_REASONS = ["Damaged", "Defective", "Wrong Material", "Excess Quantity", "Quality Rejection", "Expired", "Other"];
-const departments = ["Pharmacy", "Purchase", "Sales", "Hospital / Clinic", "Administration"];
-const materialOptions = materials.map((m) => `${m.code} — ${m.name}`);
-
-const materialColumn = { key: "code", label: "Medicine", type: "material-select" };
+const GRN_INSPECTION_COMPLETE_STATUSES = ["Passed", "Failed", "Partially Passed"];
+const ISSUE_STATUSES = ["Issue Incomplete", "Issue Complete", "Cancelled"];
+const ISSUE_TYPES = ["Department", "Hospital / Clinic", "Retail Counter", "Other"];
+const RETURN_STATUSES = ["Draft", "Pending Approval", "Approved", "Rejected", "Returned", "Cancelled"];
+const PRIORITIES = ["Low", "Normal", "High", "Urgent"];
+const RETURN_REASONS = ["Damaged", "Defective", "Wrong Medicine", "Excess Quantity", "Quality Rejection", "Expired", "Other"];
+const compositionColumn = { key: "composition", label: "Composition", type: "composition-select", required: true };
+const materialColumn = { key: "code", label: "Medicine", type: "material-select", required: true };
 const nameColumn = { key: "name", label: "Medicine Name", type: "text", readOnly: true };
 const unitColumn = { key: "unit", label: "Unit", type: "text", readOnly: true };
 
 export const purchaseEntities = {
   "purchase-request": {
-    label: "Medicine Requisition",
-    singular: "Medicine Requisition",
+    label: "Purchase Request",
+    singular: "Request",
     icon: "FileText",
-    description: "Record internal medicine requirements before creating a purchase order.",
-    statLabel: "Total Requisitions",
+    description: "Create and manage internal requests for purchasing medicines.",
+    statLabel: "Total Requests",
     rows: purchaseRequests,
     list: {
-      subtitle: "Record and approve internal medicine requirements.",
-      searchPlaceholder: "Search requisition number, requester, medicine...",
+      subtitle: "Create and manage internal requests for purchasing medicines.",
+      searchPlaceholder: "Search request number, requester, medicine...",
       searchKeys: ["id", "requestedBy"],
       dateKey: "date",
       filters: [
         { key: "status", label: "Status", options: PR_STATUSES },
-        { key: "department", label: "Department", options: departments },
         { key: "priority", label: "Priority", options: PRIORITIES },
       ],
       summary: [
@@ -436,25 +355,25 @@ export const purchaseEntities = {
         { label: "Pending Approval", tone: "warning", compute: (rows) => rows.filter((r) => r.status === "Pending Approval").length },
         { label: "Approved", tone: "success", compute: (rows) => rows.filter((r) => r.status === "Approved").length },
         { label: "Rejected", tone: "danger", compute: (rows) => rows.filter((r) => r.status === "Rejected").length },
-        { label: "Converted to PO", tone: "accent", compute: (rows) => rows.filter((r) => r.status === "Converted").length },
+        { label: "Received", tone: "accent", compute: (rows) => rows.filter((r) => r.status === "Received").length },
       ],
       columns: [
-        { key: "id", label: "Requisition No", mono: true },
-        { key: "date", label: "Requisition Date" },
-        { key: "requestingStore", label: "Requesting Store" },
+        { key: "id", label: "Request No", mono: true },
+        { key: "date", label: "Request Date & Time" },
         { key: "requestedBy", label: "Requested By" },
-        { key: "department", label: "Department" },
         { key: "requiredDate", label: "Required Date" },
-        { key: "items", label: "Items", align: "right", render: (row) => row.items.length },
+        { key: "items", label: "Medicines", align: "right", render: (row) => row.items.length },
         { key: "priority", label: "Priority" },
         { key: "status", label: "Status", badge: true },
       ],
       rowActions: [
         { key: "view", label: "View", icon: "Eye" },
-        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => row.status === "Converted" },
-        { key: "approve", label: "Approve", icon: "Check", tone: "success", showWhen: (row) => row.status === "Pending Approval", setStatus: "Approved" },
-        { key: "reject", label: "Reject", icon: "X", tone: "danger", showWhen: (row) => row.status === "Pending Approval", setStatus: "Rejected", confirm: "Reject this purchase request?" },
+        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Approved", "Partial Issue", "Full Issue", "Rejected", "Received", "Cancelled"].includes(row.status) },
+        { key: "approve", label: "Approve", icon: "Check", tone: "success", showWhen: (row) => row.status === "Pending Approval", setStatus: "Approved", approvalAction: "approve", confirm: "Approve this purchase request?" },
+        { key: "reject", label: "Reject", icon: "X", tone: "danger", showWhen: (row) => row.status === "Pending Approval", setStatus: "Rejected", approvalAction: "reject", requiresReason: true },
+        { key: "receive", label: "Received", icon: "PackageCheck", tone: "success", showWhen: (row) => ["Approved", "Full Issue"].includes(row.status), setStatus: "Received" },
         { key: "convert", label: "Convert to PO", icon: "ArrowRightCircle", showWhen: (row) => row.status === "Approved", convertsTo: "purchase-order" },
+        { key: "issue", label: "Purchase Issue", icon: "Send", showWhen: (row) => ["Approved", "Partial Issue"].includes(row.status), convertsTo: "purchase-issue" },
         { key: "print", label: "Print", icon: "Printer", print: true },
       ],
     },
@@ -464,65 +383,59 @@ export const purchaseEntities = {
           key: "basic",
           label: "Basic Information",
           fields: [
-            { key: "id", label: "Requisition Number", type: "text", required: true, autoLabel: "Auto-generated" },
-            { key: "date", label: "Requisition Date", type: "date", required: true },
-            { key: "requestingStore", label: "Requesting Store", type: "select", required: true, options: warehouses },
-            { key: "requiredDate", label: "Required-by Date", type: "date", required: true },
-            { key: "priority", label: "Priority", type: "select", required: true, options: PRIORITIES },
-            { key: "requestedBy", label: "Requested By", type: "text", required: true },
-            { key: "department", label: "Department", type: "select", required: true, options: departments },
-            { key: "remarks", label: "Remarks", type: "textarea", span: "full" },
-            { key: "status", label: "Status", type: "select", options: PR_STATUSES, readOnly: true },
+            { key: "date", label: "Request Date & Time", type: "datetime-local", required: true, span: "quarter" },
+            { key: "requiredDate", label: "Required Date", type: "date", span: "quarter" },
+            { key: "priority", label: "Priority", type: "select", options: PRIORITIES, span: "quarter" },
           ],
         },
         {
           key: "items",
-          label: "Requisition Items",
+          label: "Medicine Items",
           fields: [
             {
               key: "items",
-              label: "Requisition Items",
+              label: "Medicine Items",
               type: "lineItems",
               span: "full",
               allowAddRemove: true,
+              minRows: 1,
+              requirePositiveQuantityKey: "qty",
+              requirePositiveQuantityMessage: "Add at least one medicine with a required quantity greater than zero.",
+              totals: "request",
               columns: [
+                compositionColumn,
                 materialColumn,
-                { key: "currentStock", label: "Current Stock", type: "number", readOnly: true },
-                { key: "minStock", label: "Minimum Stock", type: "number", readOnly: true },
-                { key: "reorderLevel", label: "Reorder Level", type: "number", readOnly: true },
-                { key: "requestedQty", label: "Requested Quantity", type: "number" },
-                { key: "approvedQty", label: "Approved Quantity", type: "number" },
-                { key: "lastPurchaseRate", label: "Last Purchase Rate", type: "number" },
-                { key: "preferredSupplier", label: "Preferred Supplier", type: "text" },
+                { key: "qty", label: "Required Qty", type: "number", required: true, min: 0 },
+                unitColumn,
+                { key: "total", label: "Total Price", type: "computed-line-total" },
                 { key: "remarks", label: "Remarks", type: "text" },
               ],
             },
-          ],
-        },
-        {
-          key: "additional",
-          label: "Additional Information",
-          fields: [
-            { key: "attachment", label: "Attachment", type: "file" },
-            { key: "internalNotes", label: "Notes", type: "textarea", span: "full" },
+            { key: "purpose", label: "Purpose / Reason", type: "textarea", span: "half" },
+            { key: "internalNotes", label: "Notes", type: "textarea", span: "half" },
           ],
         },
         {
           key: "approval",
           label: "Approval",
           fields: [
-            { key: "requestedBy", label: "Requested By", type: "text", readOnly: true },
-            { key: "approvedBy", label: "Approved By", type: "text" },
-            { key: "approvalDate", label: "Approval Date", type: "date" },
-            { key: "approvalRemarks", label: "Approval Remarks", type: "textarea", span: "full" },
+            { key: "approvedBy", label: "Approved By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvedBy) },
+            { key: "approvalDate", label: "Approval Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvalDate) },
+            { key: "rejectedBy", label: "Rejected By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectedBy) },
+            { key: "rejectionDate", label: "Rejection Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectionDate) },
+            { key: "rejectionReason", label: "Rejection Reason", type: "textarea", readOnly: true, span: "full", showWhen: (row) => Boolean(row.rejectionReason) },
+            { key: "receivedBy", label: "Received By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.receivedBy) },
+            { key: "receivedDate", label: "Received Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.receivedDate) },
           ],
         },
       ],
     },
     formActions: [
       { key: "cancel", label: "Cancel", kind: "ghost" },
-      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft" },
-      { key: "submit", label: "Submit for Approval", kind: "primary", status: "Pending Approval", validate: true },
+      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft", showWhen: (row) => row.status === "Draft" },
+      { key: "submit", label: "Submit for Approval", kind: "primary", status: "Pending Approval", validate: true, showWhen: (row) => row.status === "Draft" },
+      { key: "approve", label: "Approve", kind: "primary", tone: "success", status: "Approved", validate: true, showWhen: (row) => row.status === "Pending Approval", approvalAction: "approve", confirm: "Approve this purchase request?" },
+      { key: "reject", label: "Reject", kind: "outline", tone: "danger", status: "Rejected", showWhen: (row) => row.status === "Pending Approval", approvalAction: "reject", requiresReason: true },
     ],
   },
 
@@ -539,77 +452,67 @@ export const purchaseEntities = {
       searchKeys: ["id", "supplier"],
       dateKey: "date",
       filters: [
-        { key: "supplier", label: "Supplier", options: suppliers },
+        { key: "supplier", label: "Supplier", optionsFrom: "supplier" },
         { key: "status", label: "Status", options: PO_STATUSES },
-        { key: "warehouse", label: "Warehouse", options: warehouses },
+        { key: "warehouse", label: "Warehouse", optionsFrom: "warehouse" },
       ],
       summary: [
         { label: "Total POs", tone: "primary", compute: (rows) => rows.length },
         { label: "Pending Approval", tone: "warning", compute: (rows) => rows.filter((r) => r.status === "Pending Approval").length },
         { label: "Open Orders", tone: "accent", compute: (rows) => rows.filter((r) => ["Ordered", "Approved"].includes(r.status)).length },
         { label: "Partially Received", tone: "warning", compute: (rows) => rows.filter((r) => r.status === "Partially Received").length },
-        { label: "Fully Received", tone: "success", compute: (rows) => rows.filter((r) => r.status === "Received").length },
+        { label: "Completed GRN", tone: "success", compute: (rows) => rows.filter((r) => ["Completed GRN", "Received"].includes(r.status)).length },
         { label: "Cancelled", tone: "danger", compute: (rows) => rows.filter((r) => r.status === "Cancelled").length },
       ],
       columns: [
         { key: "id", label: "PO Number", mono: true, link: true },
         { key: "supplier", label: "Supplier" },
-        { key: "date", label: "PO Date" },
+        { key: "date", label: "PO Date & Time" },
         { key: "expectedDate", label: "Expected Date" },
         { key: "amount", label: "Total Amount", align: "right", money: true, render: (row) => poTotals(row.items).grandTotal },
         { key: "status", label: "Status", badge: true },
       ],
       rowActions: [
         { key: "view", label: "View", icon: "Eye" },
-        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Received", "Cancelled"].includes(row.status) },
+        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Approved", "Rejected", "Ordered", "Partially Received", "Completed GRN", "Received", "Cancelled", "Returned"].includes(row.status) },
         { key: "print", label: "Print", icon: "Printer", print: true },
+        { key: "approve", label: "Approve", icon: "Check", tone: "success", showWhen: (row) => row.status === "Pending Approval", setStatus: "Approved", approvalAction: "approve", confirm: "Approve this purchase order?" },
+        { key: "reject", label: "Reject", icon: "X", tone: "danger", showWhen: (row) => row.status === "Pending Approval", setStatus: "Rejected", approvalAction: "reject", requiresReason: true },
         { key: "send", label: "Send to Supplier", icon: "Send", showWhen: (row) => row.status === "Approved", setStatus: "Ordered" },
         { key: "receive", label: "Receive", icon: "PackageCheck", showWhen: (row) => ["Ordered", "Partially Received"].includes(row.status), convertsTo: "goods-receipt" },
-        { key: "cancel", label: "Cancel", icon: "Ban", tone: "danger", hideWhen: (row) => ["Received", "Cancelled"].includes(row.status), setStatus: "Cancelled", confirm: "Cancel this purchase order?" },
+        { key: "cancel", label: "Cancel", icon: "Ban", tone: "danger", hideWhen: (row) => ["Approved", "Rejected", "Completed GRN", "Received", "Cancelled"].includes(row.status), setStatus: "Cancelled", confirm: "Cancel this purchase order?" },
       ],
     },
     form: {
       tabs: [
         {
-          key: "supplier",
-          label: "Supplier Information",
-          fields: [
-            { key: "supplier", label: "Supplier", type: "select", required: true, options: suppliers },
-            { key: "contact", label: "Contact Person", type: "text", readOnly: true },
-            { key: "phone", label: "Phone", type: "text", readOnly: true },
-            { key: "email", label: "Email", type: "text", readOnly: true },
-            { key: "billingAddress", label: "Billing Address", type: "textarea" },
-            { key: "shippingAddress", label: "Shipping Address", type: "textarea" },
-          ],
-        },
-        {
           key: "order",
           label: "Order Information",
           fields: [
-            { key: "id", label: "PO Number", type: "text", required: true, autoLabel: "Auto-generated" },
-            { key: "date", label: "PO Date", type: "date", required: true },
-            { key: "expectedDate", label: "Expected Delivery Date", type: "date" },
-            { key: "paymentTerms", label: "Payment Terms", type: "select", options: ["Net 15", "Net 30", "Net 45", "Advance"] },
-            { key: "warehouse", label: "Warehouse", type: "select", options: warehouses },
-            { key: "refPR", label: "Reference Medicine Requisition", type: "text" },
-            { key: "approvalOverride", label: "Override Approved Quantity Limit", type: "toggle" },
+            { key: "date", label: "PO Date & Time", type: "datetime-local", required: true, span: "quarter" },
+            { key: "supplier", label: "Supplier", type: "select", required: true, optionsFrom: "supplier", span: "quarter" },
+            { key: "expectedDate", label: "Expected Delivery Date", type: "date", span: "quarter" },
+            { key: "refPR", label: "Purchase Request", type: "select", searchable: true, multiple: true, optionsFromPurchase: "purchase-request", optionStatuses: ["Approved"], span: "quarter" },
           ],
         },
         {
           key: "items",
-          label: "Item Details",
+          label: "Medicine Details",
           fields: [
             {
               key: "items",
-              label: "Item Details",
+              label: "Medicine Details",
               type: "lineItems",
               span: "full",
               allowAddRemove: true,
+              minRows: 1,
+              requirePositiveQuantityKey: "qty",
+              requirePositiveQuantityMessage: "Add at least one medicine with an order quantity greater than zero.",
               totals: true,
               columns: [
+                compositionColumn,
                 materialColumn,
-                nameColumn,
-                { key: "qty", label: "Qty", type: "number" },
+                { key: "qty", label: "Qty", type: "number", required: true, min: 0 },
                 unitColumn,
                 { key: "price", label: "Unit Price", type: "number" },
                 { key: "discount", label: "Discount %", type: "number" },
@@ -620,39 +523,36 @@ export const purchaseEntities = {
           ],
         },
         {
-          key: "terms",
-          label: "Terms & Conditions",
+          key: "delivery",
+          label: "Delivery Information",
           fields: [
-            { key: "deliveryTerms", label: "Delivery Terms", type: "select", options: ["Ex-Works", "FOB", "CIF"] },
-            { key: "warranty", label: "Warranty", type: "text" },
-            { key: "termsNotes", label: "Terms & Conditions", type: "textarea", span: "full" },
-          ],
-        },
-        {
-          key: "attachments",
-          label: "Attachments",
-          fields: [
-            { key: "quotation", label: "Quotation", type: "file" },
-            { key: "supplierDocument", label: "Supplier Document", type: "file" },
+            { key: "warehouse", label: "Warehouse", type: "select", searchable: true, optionsFrom: "warehouse", span: "half" },
+            { key: "deliveryNote", label: "Note", type: "textarea", span: "half", fillHeight: true },
           ],
         },
         {
           key: "approval",
           label: "Approval",
           fields: [
-            { key: "preparedBy", label: "Prepared By", type: "text" },
-            { key: "approvedBy", label: "Approved By", type: "text" },
-            { key: "approvalDate", label: "Approval Date", type: "date" },
+            { key: "preparedBy", label: "Prepared By", type: "text", readOnly: true },
+            { key: "approvedBy", label: "Approved By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvedBy) },
+            { key: "approvalDate", label: "Approval Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvalDate) },
+            { key: "rejectedBy", label: "Rejected By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectedBy) },
+            { key: "rejectionDate", label: "Rejection Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectionDate) },
+            { key: "rejectionReason", label: "Rejection Reason", type: "textarea", readOnly: true, span: "full", showWhen: (row) => Boolean(row.rejectionReason) },
+            { key: "receivedBy", label: "Received By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.receivedBy) },
+            { key: "receivedDate", label: "Received Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.receivedDate) },
           ],
         },
       ],
     },
     formActions: [
-      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft" },
-      { key: "submit", label: "Submit for Approval", kind: "outline", status: "Pending Approval", validate: true },
-      { key: "approve", label: "Approve", kind: "outline", status: "Approved", validate: true },
+      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft", showWhen: (row) => row.status === "Draft" },
+      { key: "submit", label: "Submit for Approval", kind: "outline", status: "Pending Approval", validate: true, showWhen: (row) => row.status === "Draft" },
+      { key: "approve", label: "Approve", kind: "primary", tone: "success", status: "Approved", validate: true, showWhen: (row) => row.status === "Pending Approval", approvalAction: "approve", confirm: "Approve this purchase order?" },
+      { key: "reject", label: "Reject", kind: "outline", tone: "danger", status: "Rejected", showWhen: (row) => row.status === "Pending Approval", approvalAction: "reject", requiresReason: true },
       { key: "print", label: "Print PO", kind: "outline", print: true },
-      { key: "send", label: "Send to Supplier", kind: "primary", status: "Ordered", validate: true },
+      { key: "send", label: "Send to Supplier", kind: "primary", status: "Ordered", validate: true, showWhen: (row) => row.status === "Approved" },
     ],
   },
 
@@ -660,17 +560,17 @@ export const purchaseEntities = {
     label: "Goods Receipt",
     singular: "Goods Receipt",
     icon: "PackageCheck",
-    description: "Record materials physically received from suppliers and update inventory.",
+    description: "Record medicines physically received from suppliers and update inventory.",
     statLabel: "Total Receipts",
     rows: goodsReceipts,
     list: {
-      subtitle: "Record materials physically received from suppliers and update inventory.",
+      subtitle: "Record medicines physically received from suppliers and update inventory.",
       searchPlaceholder: "Search GRN number, PO number, supplier...",
       searchKeys: ["id", "refPO", "supplier"],
       dateKey: "date",
       filters: [
-        { key: "supplier", label: "Supplier", options: suppliers },
-        { key: "warehouse", label: "Warehouse", options: warehouses },
+        { key: "supplier", label: "Supplier", optionsFrom: "supplier" },
+        { key: "warehouse", label: "Warehouse", optionsFrom: "warehouse" },
         { key: "status", label: "Status", options: GRN_STATUSES },
       ],
       summary: [
@@ -695,14 +595,15 @@ export const purchaseEntities = {
         { key: "id", label: "GRN Number", mono: true, link: true },
         { key: "refPO", label: "PO Number", mono: true },
         { key: "supplier", label: "Supplier" },
-        { key: "date", label: "Receipt Date" },
+        { key: "date", label: "Receipt Date & Time" },
         { key: "warehouse", label: "Warehouse" },
-        { key: "items", label: "Items", align: "right", render: (row) => row.items.length },
+        { key: "items", label: "Medicines", align: "right", render: (row) => row.items.length },
         { key: "status", label: "Status", badge: true },
       ],
       rowActions: [
         { key: "view", label: "View", icon: "Eye" },
         { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => row.status === "Completed" },
+        { key: "delete", label: "Delete", icon: "Trash2", tone: "danger", showWhen: (row) => row.status === "Draft", delete: true, confirm: "Delete this draft goods receipt?" },
         { key: "print", label: "Print", icon: "Printer", print: true },
       ],
     },
@@ -712,37 +613,46 @@ export const purchaseEntities = {
           key: "receipt",
           label: "Receipt Information",
           fields: [
-            { key: "id", label: "GRN Number", type: "text", required: true, autoLabel: "Auto-generated" },
-            { key: "date", label: "Receipt Date", type: "date", required: true },
-            { key: "supplier", label: "Supplier", type: "select", required: true, options: suppliers },
-            { key: "refPO", label: "Purchase Order", type: "select", required: true, options: purchaseOrders.map((po) => po.id) },
-            { key: "warehouse", label: "Warehouse", type: "select", required: true, options: warehouses },
-            { key: "receivedBy", label: "Received By", type: "text" },
-            { key: "vehicleNumber", label: "Vehicle Number", type: "text" },
+            { key: "date", label: "Receipt Date & Time", type: "datetime-local", required: true },
+            { key: "refPO", label: "Purchase Order", type: "select", required: true, searchable: true, optionsFromPurchase: "purchase-order", optionStatuses: ["Approved", "Ordered", "Partially Received"] },
+            { key: "supplier", label: "Supplier", type: "select", required: true, searchable: true, optionsFrom: "supplier" },
+            { key: "warehouse", label: "Warehouse", type: "select", required: true, searchable: true, optionsFrom: "warehouse" },
             { key: "challanNumber", label: "Delivery Challan Number", type: "text" },
             { key: "invoiceNumber", label: "Supplier Invoice Number", type: "text" },
           ],
         },
         {
           key: "items",
-          label: "Received Items",
+          label: "Received Medicines",
           fields: [
             {
               key: "items",
-              label: "Received Items",
+              label: "Received Medicines",
               type: "lineItems",
               span: "full",
               allowAddRemove: false,
+              allowRemoveRows: true,
+              minRows: 1,
+              requirePositiveQuantityKey: "receivedQty",
+              headerTone: "teal",
+              compactRows: true,
+              minWidth: "1140px",
               columns: [
-                { ...materialColumn, readOnly: true },
-                nameColumn,
-                { key: "orderedQty", label: "Ordered Qty", type: "number", readOnly: true },
-                { key: "receivedQty", label: "Received Qty", type: "number" },
-                { key: "acceptedQty", label: "Accepted Qty", type: "number" },
-                { key: "rejectedQty", label: "Rejected Qty", type: "number" },
-                unitColumn,
-                { key: "batch", label: "Batch No", type: "text" },
-                { key: "expiry", label: "Expiry Date", type: "date" },
+                { ...compositionColumn, readOnly: true, width: "160px" },
+                { ...materialColumn, label: "Medicine", readOnly: true, required: true, width: "170px" },
+                { key: "batch", label: "Batch No", type: "text", width: "80px" },
+                { key: "location", label: "Location", type: "line-select", optionsFrom: "stock-location", dependsOn: "warehouse", width: "110px" },
+                { key: "expiry", label: "Exp. Date", type: "date", width: "120px" },
+                { key: "orderedQty", label: "Order Qty", type: "number", readOnly: true, required: true, width: "58px" },
+                { key: "receivedQty", label: "Receive Qty", type: "number", required: true, syncQuantity: true, width: "66px" },
+                { key: "unit", label: "Unit", type: "text", readOnly: true, required: true, width: "70px" },
+                { key: "testQty", label: "Test QTY", type: "number", width: "70px" },
+                { key: "mrp", label: "MRP/QTY", type: "number", width: "80px" },
+                { key: "rate", label: "Rate/QTY", type: "number", required: true, width: "80px" },
+                { key: "netAmount", label: "Net Amt.", type: "computed-grn-net", required: true, width: "90px" },
+                { key: "discountAmount", label: "Dis (₹)", type: "number", min: 0, width: "76px" },
+                { key: "gst", label: "GST (%)", type: "number", min: 0, width: "62px" },
+                { key: "amount", label: "Amount", type: "computed-grn-amount", required: true, width: "90px" },
               ],
             },
           ],
@@ -750,12 +660,13 @@ export const purchaseEntities = {
         {
           key: "quality",
           label: "Quality Inspection",
+          compact: true,
           fields: [
-            { key: "inspectionRequired", label: "Inspection Required", type: "toggle" },
-            { key: "qualityStatus", label: "Quality Status", type: "select", options: ["Pending", "Passed", "Failed", "Partially Passed"] },
-            { key: "inspectedBy", label: "Inspector", type: "text" },
-            { key: "inspectionDate", label: "Inspection Date", type: "date" },
-            { key: "inspectionRemarks", label: "Inspection Remarks", type: "textarea", span: "full" },
+            { key: "inspectionRequired", label: "Inspection Required", type: "toggle", labelOutside: true, span: "quarter" },
+            { key: "qualityStatus", label: "Quality Status", type: "select", options: ["Pending", "Passed", "Failed", "Partially Passed"], span: "quarter", disabledWhen: (row) => !row.inspectionRequired },
+            { key: "inspectedBy", label: "Inspector", type: "text", span: "quarter", disabledWhen: (row) => !row.inspectionRequired },
+            { key: "inspectionDate", label: "Inspection Date", type: "date", span: "quarter", disabledWhen: (row) => !row.inspectionRequired },
+            { key: "inspectionRemarks", label: "Inspection Remarks", type: "textarea", rows: 2, span: "full", disabledWhen: (row) => !row.inspectionRequired },
           ],
         },
         {
@@ -770,11 +681,120 @@ export const purchaseEntities = {
       ],
     },
     formActions: [
-      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft" },
-      { key: "submit", label: "Submit for Inspection", kind: "outline", status: "Pending Inspection" },
-      { key: "reject", label: "Reject", kind: "outline", tone: "danger", status: "Rejected", confirm: "Reject this entire receipt?" },
-      { key: "accept", label: "Accept & Update Stock", kind: "primary", status: "Completed", validate: true, updatesStock: "increase" },
+      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft", validate: true, showWhen: (row) => row.status === "Draft" && !row.stockUpdated },
+      { key: "submit", label: "Submit for Inspection", kind: "outline", status: "Pending Inspection", validate: true, showWhen: (row) => row.inspectionRequired && row.status === "Draft" && !row.stockUpdated, activityEvent: "Submitted for Inspection" },
+      { key: "stockUpdate", label: "Save & Stock Update", kind: "primary", status: "Completed", validate: true, updatesStock: "increase", showWhen: (row) => !row.stockUpdated && (!row.inspectionRequired || GRN_INSPECTION_COMPLETE_STATUSES.includes(row.qualityStatus)), activityEvent: "Stock Updated", confirm: "Save this GRN and update stock?" },
       { key: "print", label: "Print GRN", kind: "outline", print: true },
+    ],
+  },
+
+  "purchase-issue": {
+    label: "Purchase Issue",
+    singular: "Purchase Issue",
+    icon: "FileText",
+    description: "Issue requested medicines from available stock.",
+    statLabel: "Total Issues",
+    rows: purchaseIssues,
+    list: {
+      subtitle: "Issue medicines against approved requisitions.",
+      searchPlaceholder: "Search issue number, requisition number, department...",
+      searchKeys: ["id", "requisitionNo", "department"],
+      dateKey: "date",
+      filters: [
+        { key: "department", label: "Department", optionsFrom: "department" },
+        { key: "status", label: "Status", options: ISSUE_STATUSES },
+      ],
+      summary: [
+        { label: "Incomplete Issues", tone: "warning", compute: (rows) => rows.filter((r) => r.status === "Issue Incomplete").length },
+        { label: "Complete Issues", tone: "success", compute: (rows) => rows.filter((r) => ["Issue Complete", "Issued"].includes(r.status)).length },
+        {
+          label: "Total Issue Value",
+          tone: "primary",
+          compute: (rows) =>
+            new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(
+              rows.reduce((sum, r) => sum + r.items.reduce((s, i) => s + (Number(i.issueQty ?? i.qty) || 0) * (Number(i.price) || 0), 0), 0)
+            ),
+        },
+      ],
+      columns: [
+        { key: "id", label: "Issue No", mono: true, link: true },
+        { key: "requisitionNo", label: "Requisition No", mono: true },
+        { key: "date", label: "DATE & TIME" },
+        { key: "department", label: "Department" },
+        { key: "status", label: "Status", badge: true },
+      ],
+      rowActions: [
+        { key: "view", label: "View", icon: "Eye" },
+        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Issue Complete", "Issued", "Cancelled"].includes(row.status) },
+        { key: "print", label: "Print", icon: "Printer", print: true },
+      ],
+    },
+    form: {
+      tabs: [
+        {
+          key: "issue",
+          label: "Issue Information",
+          fields: [
+            { key: "date", label: "DATE & TIME", type: "text", required: true, uppercase: true, span: "quarter" },
+            { key: "department", label: "Department", type: "select", required: true, searchable: true, optionsFrom: "department", span: "quarter", placeholder: "Select One....." },
+            { key: "requisitionNo", label: "Requisition No", type: "select", required: true, searchable: true, optionsFromPurchase: "purchase-request", optionStatuses: ["Approved", "Partial Issue"], span: "quarter", placeholder: "Select Requisition" },
+          ],
+        },
+        {
+          key: "items",
+          label: "Medicine Items",
+          fields: [
+            {
+              key: "items",
+              label: "Medicine Items",
+              type: "lineItems",
+              span: "full",
+              allowAddRemove: false,
+              totals: "issue",
+              defaultRow: { issueQty: 0, remarks: "" },
+              requirePositiveQuantityKey: "issueQty",
+              requirePositiveQuantityMessage: "At least one item must have an issue quantity.",
+              columns: [
+                { ...compositionColumn, readOnly: true },
+                { ...materialColumn, readOnly: true },
+                { key: "requestedQty", label: "Requested Qty", type: "number", readOnly: true },
+                { key: "previouslyIssuedQty", label: "Already Issued", type: "number", readOnly: true },
+                { key: "remainingQty", label: "Remaining Qty", type: "number", readOnly: true },
+                { key: "availableQty", label: "Available Stock", type: "number", readOnly: true },
+                { key: "issueQty", label: "Issue Qty", type: "number", maxKey: "maxIssueQty" },
+                unitColumn,
+                { key: "total", label: "Total Price", type: "computed-line-total" },
+                { key: "remarks", label: "Remarks", type: "text" },
+              ],
+            },
+          ],
+        },
+        {
+          key: "details",
+          label: "Issue Details",
+          fields: [
+            { key: "note", label: "Note", type: "textarea", span: "half", rows: 3 },
+          ],
+        },
+        {
+          key: "approval",
+          label: "Approval",
+          fields: [
+            { key: "requestedBy", label: "Requested By", type: "text", readOnly: true },
+            { key: "approvedBy", label: "Approved By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvedBy) },
+            { key: "approvalDate", label: "Approval Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvalDate) },
+            { key: "issuedBy", label: "Issued By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.issuedBy) },
+            { key: "issuedDate", label: "Issued Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.issuedDate) },
+            { key: "rejectedBy", label: "Rejected By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectedBy) },
+            { key: "rejectionDate", label: "Rejection Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectionDate) },
+            { key: "rejectionReason", label: "Rejection Reason", type: "textarea", readOnly: true, span: "full", showWhen: (row) => Boolean(row.rejectionReason) },
+          ],
+        },
+      ],
+    },
+    formActions: [
+      { key: "save", label: "Save", kind: "outline", status: "Issue Incomplete", validate: true, showWhen: (row) => row.status !== "Issue Complete" && !row.stockUpdated },
+      { key: "issue", label: "Save & Issue", kind: "primary", status: "Issue Complete", validate: true, updatesStock: "decrease", showWhen: (row) => row.status !== "Issue Complete" && !row.stockUpdated, activityEvent: "Stock Issued" },
     ],
   },
 
@@ -782,16 +802,17 @@ export const purchaseEntities = {
     label: "Purchase Return",
     singular: "Return",
     icon: "Undo2",
-    description: "Return defective, excess or incorrect materials back to the supplier.",
+    description: "Return defective, excess or incorrect medicines back to the supplier.",
     statLabel: "Total Returns",
     rows: purchaseReturns,
     list: {
-      subtitle: "Return defective, excess or incorrect materials back to the supplier.",
+      subtitle: "Return defective, excess or incorrect medicines back to the supplier.",
       searchPlaceholder: "Search return number, supplier...",
       searchKeys: ["id", "supplier"],
       dateKey: "date",
       filters: [
-        { key: "supplier", label: "Supplier", options: suppliers },
+        { key: "supplier", label: "Supplier", optionsFrom: "supplier" },
+        { key: "warehouse", label: "Warehouse", optionsFrom: "warehouse" },
         { key: "status", label: "Status", options: RETURN_STATUSES },
         { key: "reason", label: "Reason", options: RETURN_REASONS },
       ],
@@ -818,7 +839,9 @@ export const purchaseEntities = {
       ],
       rowActions: [
         { key: "view", label: "View", icon: "Eye" },
-        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => row.status === "Returned" },
+        { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Approved", "Rejected", "Returned", "Cancelled"].includes(row.status) },
+        { key: "approve", label: "Approve Return", icon: "Check", tone: "success", showWhen: (row) => row.status === "Pending Approval", setStatus: "Approved", approvalAction: "approve" },
+        { key: "reject", label: "Reject Return", icon: "X", tone: "danger", showWhen: (row) => row.status === "Pending Approval", setStatus: "Rejected", approvalAction: "reject", requiresReason: true },
         { key: "print", label: "Print", icon: "Printer", print: true },
       ],
     },
@@ -827,33 +850,37 @@ export const purchaseEntities = {
         {
           key: "return",
           label: "Return Information",
+          compact: true,
           fields: [
-            { key: "id", label: "Return Number", type: "text", required: true, autoLabel: "Auto-generated" },
-            { key: "date", label: "Return Date", type: "date", required: true },
-            { key: "supplier", label: "Supplier", type: "select", required: true, options: suppliers },
-            { key: "refGRN", label: "Reference GRN", type: "select", required: true, options: goodsReceipts.map((g) => g.id) },
-            { key: "refPO", label: "Reference PO", type: "text", readOnly: true },
-            { key: "warehouse", label: "Warehouse", type: "select", options: warehouses },
-            { key: "reason", label: "Return Reason", type: "select", options: RETURN_REASONS },
+            { key: "id", label: "Return Number", type: "text", required: true, autoLabel: "Auto-generated", span: "quarter" },
+            { key: "date", label: "Return Date", type: "date", required: true, span: "quarter" },
+            { key: "supplier", label: "Supplier", type: "select", required: true, searchable: true, optionsFrom: "supplier", span: "quarter" },
+            { key: "refGRN", label: "Reference GRN", type: "select", required: true, searchable: true, optionsFromPurchase: "goods-receipt", span: "quarter" },
+            { key: "refPO", label: "Reference PO", type: "text", readOnly: true, span: "quarter" },
+            { key: "warehouse", label: "Warehouse", type: "select", searchable: true, optionsFrom: "warehouse", span: "quarter" },
+            { key: "reason", label: "Return Reason", type: "select", options: RETURN_REASONS, span: "quarter" },
           ],
         },
         {
           key: "items",
-          label: "Return Items",
+          label: "Return Medicines",
           fields: [
             {
               key: "items",
-              label: "Return Items",
+              label: "Return Medicines",
               type: "lineItems",
               span: "full",
               allowAddRemove: false,
               totals: "return",
+              requirePositiveQuantityKey: "returnQty",
+              requirePositiveQuantityMessage: "At least one item must have a return quantity.",
               columns: [
+                { ...compositionColumn, readOnly: true },
                 { ...materialColumn, readOnly: true },
                 nameColumn,
                 { key: "receivedQty", label: "Received Qty", type: "number", readOnly: true },
                 { key: "availableQty", label: "Available Qty", type: "number", readOnly: true },
-                { key: "returnQty", label: "Return Qty", type: "number", maxKey: "availableQty" },
+                { key: "returnQty", label: "Return Qty", type: "number", min: 0, maxKey: "availableQty" },
                 unitColumn,
                 { key: "batch", label: "Batch No", type: "text", readOnly: true },
                 { key: "reason", label: "Reason", type: "text" },
@@ -875,21 +902,25 @@ export const purchaseEntities = {
           key: "approval",
           label: "Approval",
           fields: [
-            { key: "requestedBy", label: "Requested By", type: "text" },
-            { key: "approvedBy", label: "Approved By", type: "text" },
-            { key: "approvalDate", label: "Approval Date", type: "date" },
+            { key: "requestedBy", label: "Requested By", type: "text", readOnly: true },
+            { key: "approvedBy", label: "Approved By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvedBy) },
+            { key: "approvalDate", label: "Approval Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.approvalDate) },
+            { key: "rejectedBy", label: "Rejected By", type: "text", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectedBy) },
+            { key: "rejectionDate", label: "Rejection Date", type: "date", readOnly: true, autoLabel: "Auto-updated", showWhen: (row) => Boolean(row.rejectionDate) },
+            { key: "rejectionReason", label: "Rejection Reason", type: "textarea", readOnly: true, span: "full", showWhen: (row) => Boolean(row.rejectionReason) },
           ],
         },
       ],
     },
     formActions: [
-      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft" },
-      { key: "submit", label: "Submit for Approval", kind: "outline", status: "Pending Approval", validate: true },
-      { key: "approve", label: "Approve Return", kind: "outline", status: "Approved", validate: true },
-      { key: "complete", label: "Complete Return", kind: "primary", status: "Returned", validate: true, updatesStock: "decrease" },
+      { key: "saveDraft", label: "Save Draft", kind: "outline", status: "Draft", showWhen: (row) => row.status === "Draft" },
+      { key: "submit", label: "Submit for Approval", kind: "outline", status: "Pending Approval", validate: true, showWhen: (row) => row.status === "Draft" },
+      { key: "approve", label: "Approve Return", kind: "primary", status: "Approved", validate: true, showWhen: (row) => row.status === "Pending Approval", approvalAction: "approve" },
+      { key: "reject", label: "Reject Return", kind: "outline", tone: "danger", status: "Rejected", showWhen: (row) => row.status === "Pending Approval", approvalAction: "reject", requiresReason: true },
+      { key: "complete", label: "Complete Return", kind: "primary", status: "Returned", validate: true, updatesStock: "decrease", showWhen: (row) => row.status === "Approved" },
       { key: "print", label: "Print Return", kind: "outline", print: true },
     ],
   },
 };
 
-export const purchaseEntityOrder = ["purchase-request", "purchase-order", "goods-receipt", "purchase-return"];
+export const purchaseEntityOrder = ["purchase-request", "purchase-order", "goods-receipt", "purchase-issue", "purchase-return"];
