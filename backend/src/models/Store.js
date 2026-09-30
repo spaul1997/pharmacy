@@ -186,7 +186,14 @@ const storeSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-storeSchema.index({ tenantId: 1, storeName: 1 });
+storeSchema.index(
+  { tenantId: 1, storeName: 1 },
+  {
+    unique: true,
+    name: "unique_warehouse_name_per_tenant",
+    collation: { locale: "en", strength: 2 },
+  }
+);
 storeSchema.index({ tenantId: 1, storeType: 1 });
 storeSchema.index(
   { tenantId: 1, code: 1 },

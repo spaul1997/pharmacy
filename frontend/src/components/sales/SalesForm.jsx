@@ -96,6 +96,7 @@ function buildLinkedPatch(entityKey, fieldKey, value, salesData, masterData, has
     return {
       customerId: value,
       customerName: customer?.name || "",
+      customerType: customer?.customerType || "",
       customerMobile: customer?.mobile || customer?.phone || "",
       billingAddress: fullAddress(customer),
       shippingAddress: fullAddress(customer, defaultShipping),
@@ -704,10 +705,11 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
       date: documentDate,
       status: "Draft",
       activity: [{ event: "Draft", date: documentDate, by: "You" }],
-      ...(entityKey === "sales-order" ? { salesChannel: "Direct" } : {}),
+      ...(entityKey === "sales-order" && !isCreateBill ? { salesChannel: "Direct" } : {}),
       ...(isCreateBill
         ? {
             source: "Create Bill",
+            customerType: "",
             priority: "Normal",
             paymentTerms: "Cash on Delivery",
             paymentMode: "Cash",
@@ -762,7 +764,7 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
   function validate() {
     const nextErrors = {};
     let firstInvalidTab = null;
-    entity.form.tabs.forEach((tab) => {
+    (isCreateBill ? billTabs : entity.form.tabs).forEach((tab) => {
       tab.fields.forEach((field) => {
         if (field.required && !field.autoLabel && !String(values[field.key] ?? "").trim()) {
           nextErrors[field.key] = `${field.label} is required.`;
@@ -792,6 +794,7 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
   function persist(patch) {
     const key = keyOf(values);
     const record = { ...values, ...patch, updatedBy: "You", updatedAt: now() };
+    if (isCreateBill) delete record.salesChannel;
     if (isCreate) {
       record.createdBy = "You";
       record.createdAt = now();
@@ -904,9 +907,26 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
     .filter((row) => row.status === "Active")
     .map((row) => row.name)
     .filter(Boolean);
+  const configuredCustomerTypes = masterData
+    .getRows("customer-type")
+    .filter((row) => row.status !== "Inactive")
+    .map((row) => row.name)
+    .filter(Boolean);
+  const customerTypeOptions = configuredCustomerTypes.length
+    ? configuredCustomerTypes
+    : ["Retail Customer", "Wholesale Customer", "Hospital / Clinic"];
   const billTabs = isCreateBill
     ? [
-        ...entity.form.tabs.filter((tab) => tab.key !== "credit"),
+        ...entity.form.tabs
+          .filter((tab) => tab.key !== "credit")
+          .map((tab) => ({
+            ...tab,
+            fields: tab.fields.map((field) =>
+              field.key === "salesChannel"
+                ? { key: "customerType", label: "Customer Type", type: "select", required: true, options: customerTypeOptions }
+                : field
+            ),
+          })),
         {
           key: "payment",
           label: "Payment Details",

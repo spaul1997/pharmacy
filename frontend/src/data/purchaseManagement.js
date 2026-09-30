@@ -9,10 +9,13 @@ export const suppliers = masterEntities.supplier.list.rows.map((s) => s.name);
 export const materials = masterEntities["product-item"].list.rows.map((m) => ({
   code: m.code,
   name: m.name,
+  brand: m.brand || "",
+  category: m.category || "",
   genericName: m.genericName || "",
   composition: m.composition || "",
   unit: m.unit,
   price: m.price,
+  gst: Number(m.gst) || 0,
 }));
 export const warehouses = masterEntities.warehouse.list.rows.map((w) => w.name);
 
@@ -29,13 +32,19 @@ export function lineTotal(item) {
   return base * (1 + tax / 100);
 }
 
+export function lineGstAmount(item) {
+  const qty = Number(item.qty) || 0;
+  const price = Number(item.price) || 0;
+  const discount = Number(item.discount) || 0;
+  const gst = Number(item.tax) || 0;
+  const taxableAmount = qty * price * (1 - discount / 100);
+  return taxableAmount * (gst / 100);
+}
+
 export function poTotals(items) {
   const subtotal = items.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.price) || 0), 0);
   const discount = items.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.price) || 0) * ((Number(item.discount) || 0) / 100), 0);
-  const tax = items.reduce((sum, item) => {
-    const base = (Number(item.qty) || 0) * (Number(item.price) || 0) * (1 - (Number(item.discount) || 0) / 100);
-    return sum + base * ((Number(item.tax) || 0) / 100);
-  }, 0);
+  const tax = items.reduce((sum, item) => sum + lineGstAmount(item), 0);
   const grandTotal = subtotal - discount + tax;
   return { subtotal, discount, tax, grandTotal };
 }
@@ -371,7 +380,7 @@ export const purchaseEntities = {
         { key: "edit", label: "Edit", icon: "Pencil", hideWhen: (row) => ["Approved", "Partial Issue", "Full Issue", "Rejected", "Received", "Cancelled"].includes(row.status) },
         { key: "approve", label: "Approve", icon: "Check", tone: "success", showWhen: (row) => row.status === "Pending Approval", setStatus: "Approved", approvalAction: "approve", confirm: "Approve this purchase request?" },
         { key: "reject", label: "Reject", icon: "X", tone: "danger", showWhen: (row) => row.status === "Pending Approval", setStatus: "Rejected", approvalAction: "reject", requiresReason: true },
-        { key: "receive", label: "Received", icon: "PackageCheck", tone: "success", showWhen: (row) => ["Approved", "Full Issue"].includes(row.status), setStatus: "Received" },
+        { key: "receive", label: "Received", icon: "PackageCheck", tone: "success", showWhen: (row) => row.status === "Full Issue", setStatus: "Received" },
         { key: "convert", label: "Convert to PO", icon: "ArrowRightCircle", showWhen: (row) => row.status === "Approved", convertsTo: "purchase-order" },
         { key: "issue", label: "Purchase Issue", icon: "Send", showWhen: (row) => ["Approved", "Partial Issue"].includes(row.status), convertsTo: "purchase-issue" },
         { key: "print", label: "Print", icon: "Printer", print: true },
@@ -405,10 +414,10 @@ export const purchaseEntities = {
               columns: [
                 compositionColumn,
                 materialColumn,
+                { key: "remarks", label: "Remarks", type: "text" },
                 { key: "qty", label: "Required Qty", type: "number", required: true, min: 0 },
                 unitColumn,
                 { key: "total", label: "Total Price", type: "computed-line-total" },
-                { key: "remarks", label: "Remarks", type: "text" },
               ],
             },
             { key: "purpose", label: "Purpose / Reason", type: "textarea", span: "half" },
@@ -506,17 +515,19 @@ export const purchaseEntities = {
               span: "full",
               allowAddRemove: true,
               minRows: 1,
+              defaultRow: { tax: 0 },
               requirePositiveQuantityKey: "qty",
               requirePositiveQuantityMessage: "Add at least one medicine with an order quantity greater than zero.",
               totals: true,
               columns: [
                 compositionColumn,
-                materialColumn,
-                { key: "qty", label: "Qty", type: "number", required: true, min: 0 },
+                { ...materialColumn, width: "280px" },
+                { key: "qty", label: "Qty", type: "number", required: true, min: 0, compact: true, width: "64px" },
                 unitColumn,
-                { key: "price", label: "Unit Price", type: "number" },
-                { key: "discount", label: "Discount %", type: "number" },
-                { key: "tax", label: "Tax %", type: "number" },
+                { key: "price", label: "Unit Price", type: "number", compact: true, width: "82px" },
+                { key: "discount", label: "Discount(%)", type: "number", compact: true, width: "78px" },
+                { key: "tax", label: "GST(%)", type: "number", readOnly: true },
+                { key: "gstAmount", label: "GST", type: "computed-gst-amount" },
                 { key: "total", label: "Total", type: "computed-line-total" },
               ],
             },
@@ -570,7 +581,6 @@ export const purchaseEntities = {
       dateKey: "date",
       filters: [
         { key: "supplier", label: "Supplier", optionsFrom: "supplier" },
-        { key: "warehouse", label: "Warehouse", optionsFrom: "warehouse" },
         { key: "status", label: "Status", options: GRN_STATUSES },
       ],
       summary: [
@@ -596,7 +606,6 @@ export const purchaseEntities = {
         { key: "refPO", label: "PO Number", mono: true },
         { key: "supplier", label: "Supplier" },
         { key: "date", label: "Receipt Date & Time" },
-        { key: "warehouse", label: "Warehouse" },
         { key: "items", label: "Medicines", align: "right", render: (row) => row.items.length },
         { key: "status", label: "Status", badge: true },
       ],
@@ -616,7 +625,6 @@ export const purchaseEntities = {
             { key: "date", label: "Receipt Date & Time", type: "datetime-local", required: true },
             { key: "refPO", label: "Purchase Order", type: "select", required: true, searchable: true, optionsFromPurchase: "purchase-order", optionStatuses: ["Approved", "Ordered", "Partially Received"] },
             { key: "supplier", label: "Supplier", type: "select", required: true, searchable: true, optionsFrom: "supplier" },
-            { key: "warehouse", label: "Warehouse", type: "select", required: true, searchable: true, optionsFrom: "warehouse" },
             { key: "challanNumber", label: "Delivery Challan Number", type: "text" },
             { key: "invoiceNumber", label: "Supplier Invoice Number", type: "text" },
           ],
@@ -636,17 +644,15 @@ export const purchaseEntities = {
               requirePositiveQuantityKey: "receivedQty",
               headerTone: "teal",
               compactRows: true,
-              minWidth: "1140px",
+              minWidth: "960px",
               columns: [
                 { ...compositionColumn, readOnly: true, width: "160px" },
                 { ...materialColumn, label: "Medicine", readOnly: true, required: true, width: "170px" },
                 { key: "batch", label: "Batch No", type: "text", width: "80px" },
-                { key: "location", label: "Location", type: "line-select", optionsFrom: "stock-location", dependsOn: "warehouse", width: "110px" },
                 { key: "expiry", label: "Exp. Date", type: "date", width: "120px" },
                 { key: "orderedQty", label: "Order Qty", type: "number", readOnly: true, required: true, width: "58px" },
                 { key: "receivedQty", label: "Receive Qty", type: "number", required: true, syncQuantity: true, width: "66px" },
                 { key: "unit", label: "Unit", type: "text", readOnly: true, required: true, width: "70px" },
-                { key: "testQty", label: "Test QTY", type: "number", width: "70px" },
                 { key: "mrp", label: "MRP/QTY", type: "number", width: "80px" },
                 { key: "rate", label: "Rate/QTY", type: "number", required: true, width: "80px" },
                 { key: "netAmount", label: "Net Amt.", type: "computed-grn-net", required: true, width: "90px" },

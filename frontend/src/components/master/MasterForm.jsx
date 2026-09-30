@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertCircle, ChevronDown, ChevronRight as Crumb, Paperclip, Plus, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight as Crumb, Paperclip, Plus, Trash2 } from "lucide-react";
 import { masterEntities } from "../../data/masterManagement.js";
 import { useMasterData } from "./MasterDataContext.jsx";
 import { useToast } from "../Toast.jsx";
@@ -43,7 +43,9 @@ function resolveFieldOptions(field, getRows, currentValue, values, stateDistrict
     const entityOptions = getRows(field.optionsFrom)
       .filter((row) => row.status !== "Inactive")
       .filter((row) => !field.optionsFilter || field.optionsFilter(row, values))
-      .map(relatedOptionLabel);
+      .map((row) => field.optionValueKey
+        ? String(row[field.optionValueKey] ?? "").trim()
+        : relatedOptionLabel(row));
 
     return uniqueOptions([...(field.prependOptions || []), ...entityOptions, currentValue]);
   }
@@ -58,8 +60,8 @@ function SearchableSelect({ field, value, options, disabled, className, onChange
   const filteredOptions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return options;
-    return options.filter((option) => option.toLowerCase().includes(q));
-  }, [options, query]);
+    return options.filter((option) => `${option}${field.optionSuffix || ""}`.toLowerCase().includes(q));
+  }, [field.optionSuffix, options, query]);
 
   useEffect(() => {
     if (!open) setQuery("");
@@ -85,7 +87,7 @@ function SearchableSelect({ field, value, options, disabled, className, onChange
         className={`${className} flex items-center justify-between gap-2 text-left`}
       >
         <span className={value ? "" : "text-slate-400"}>
-          {value || `Select ${field.label.toLowerCase()}...`}
+          {value ? `${value}${field.optionSuffix || ""}` : `Select ${field.label.toLowerCase()}...`}
         </span>
         <ChevronDown size={16} className={`shrink-0 text-[var(--muted)] transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
@@ -103,19 +105,24 @@ function SearchableSelect({ field, value, options, disabled, className, onChange
             {filteredOptions.length === 0 ? (
               <p className="px-3 py-2 text-sm text-[var(--muted)]">No options found</p>
             ) : (
-              filteredOptions.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => {
-                    onChange(option);
-                    setOpen(false);
-                  }}
-                  className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${option === value ? "font-semibold text-[var(--primary)]" : "text-[var(--ink)]"}`}
-                >
-                  {option}
-                </button>
-              ))
+              filteredOptions.map((option) => {
+                const isSelected = option === String(value ?? "");
+
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    aria-pressed={isSelected}
+                    onClick={() => {
+                      onChange(isSelected ? "" : option);
+                      setOpen(false);
+                    }}
+                    className={`block w-full px-3 py-2 text-left text-sm hover:bg-slate-50 ${isSelected ? "font-semibold text-[var(--primary)]" : "text-[var(--ink)]"}`}
+                  >
+                    {option}{field.optionSuffix || ""}
+                  </button>
+                );
+              })
             )}
           </div>
         </div>
@@ -196,7 +203,7 @@ function Field({ field, value, error, disabled, onChange }) {
             <option value="">Select {field.label.toLowerCase()}...</option>
             {options.map((option) => (
               <option key={option} value={option}>
-                {option}
+                {option}{field.optionSuffix || ""}
               </option>
             ))}
           </select>
@@ -217,7 +224,7 @@ function Field({ field, value, error, disabled, onChange }) {
           value={value}
           disabled={isDisabled}
           onChange={(event) => onChange(event.target.value)}
-          rows={3}
+          rows={field.rows || 3}
           className={baseInput}
         />
         {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
@@ -373,6 +380,12 @@ export function MasterForm({ entityKey, mode, recordId }) {
       (field?.clearOnChange || []).forEach((clearKey) => {
         next[clearKey] = "";
       });
+      if (field?.optionsFrom && field.autofill) {
+        const selectedRow = getRows(field.optionsFrom).find((row) => relatedOptionLabel(row) === value);
+        Object.entries(field.autofill).forEach(([targetKey, sourceKey]) => {
+          next[targetKey] = selectedRow?.[sourceKey] ?? "";
+        });
+      }
       return next;
     });
   }
@@ -404,10 +417,39 @@ export function MasterForm({ entityKey, mode, recordId }) {
         }
       });
     });
+
+    if (entity.uniqueTogether?.length) {
+      const normalizeUniqueValue = (key, value) => {
+        const field = entity.form.tabs.flatMap((tab) => tab.fields).find((item) => item.key === key);
+        const normalized = String(value ?? "").trim();
+        if (field?.type === "number" && normalized) return String(Number(normalized));
+        return normalized.toLocaleLowerCase();
+      };
+      const duplicate = getRows(entityKey).some((row) => {
+        const isCurrentRecord = mode === "edit" && (row.code === recordId || row.id === recordId);
+        return !isCurrentRecord && entity.uniqueTogether.every(
+          (key) => normalizeUniqueValue(key, row[key]) === normalizeUniqueValue(key, values[key])
+        );
+      });
+
+      if (duplicate) {
+        entity.uniqueTogether.forEach((key) => {
+          nextErrors[key] = entity.uniqueTogetherMessage;
+        });
+        firstInvalidTab ||= entity.form.tabs.find((tab) =>
+          tab.fields.some((field) => entity.uniqueTogether.includes(field.key))
+        )?.key;
+      }
+    }
+
     setErrors(nextErrors);
     if (firstInvalidTab) {
       setActiveTab(firstInvalidTab);
-      setErrorBanner(`Please fill in ${Object.keys(nextErrors).length} required field(s).`);
+      setErrorBanner(
+        entity.uniqueTogether?.some((key) => nextErrors[key] === entity.uniqueTogetherMessage)
+          ? entity.uniqueTogetherMessage
+          : `Please fill in ${Object.keys(nextErrors).length} required field(s).`
+      );
       return false;
     }
     setErrorBanner("");
@@ -492,9 +534,19 @@ export function MasterForm({ entityKey, mode, recordId }) {
         <span className="text-[var(--ink)]">{isView ? "View" : mode === "edit" ? "Edit" : "Add"} {entity.singular}</span>
       </p>
 
-      <h2 className="text-xl font-semibold text-[var(--ink)]">
-        {isView ? "View" : mode === "edit" ? "Edit" : "Add"} {entity.label}
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-xl font-semibold text-[var(--ink)]">
+          {isView ? "View" : mode === "edit" ? "Edit" : "Add"} {entity.label}
+        </h2>
+        <button
+          type="button"
+          onClick={handleCancel}
+          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] px-3 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50"
+        >
+          <ArrowLeft size={15} />
+          Back
+        </button>
+      </div>
 
       {errorBanner && (
         <div className="mt-4 flex items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-sm font-medium text-red-700">
@@ -523,7 +575,7 @@ export function MasterForm({ entityKey, mode, recordId }) {
           {entity.form.tabs
             .filter((tab) => tab.key === activeTab)
             .map((tab) => (
-              <div key={tab.key} className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${tab.columns === 5 ? "lg:grid-cols-5" : tab.columns === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
+              <div key={tab.key} className={`grid grid-cols-1 ${tab.compact ? "gap-3" : "gap-4"} sm:grid-cols-2 ${tab.columns === 5 ? "lg:grid-cols-5" : tab.columns === 4 ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
                 {tab.fields
                   .filter((field) => !field.autoGenerated)
                   .map((field) => (

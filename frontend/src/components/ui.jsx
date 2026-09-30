@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowDownRight, ArrowUpRight, TriangleAlert } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, LoaderCircle, TriangleAlert } from "lucide-react";
 
 const tones = {
   primary: "text-[var(--primary)] bg-blue-50",
@@ -140,7 +140,23 @@ export function Badge({ children }) {
   );
 }
 
-export function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", tone = "danger", onConfirm, onCancel }) {
+export function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", loading = false, loadingLabel = "Processing...", tone = "danger", onConfirm, onCancel }) {
+  const [internalLoading, setInternalLoading] = React.useState(false);
+  const confirmInProgressRef = React.useRef(false);
+  const isLoading = loading || internalLoading;
+
+  async function handleConfirm() {
+    if (isLoading || confirmInProgressRef.current) return;
+    confirmInProgressRef.current = true;
+    setInternalLoading(true);
+    try {
+      await onConfirm?.();
+    } finally {
+      confirmInProgressRef.current = false;
+      setInternalLoading(false);
+    }
+  }
+
   if (!open) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
@@ -162,18 +178,22 @@ export function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", 
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50"
+            disabled={isLoading}
+            className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
           >
             Cancel
           </button>
           <button
             type="button"
-            onClick={onConfirm}
-            className={`rounded-md px-4 py-2 text-sm font-semibold text-white ${
+            onClick={handleConfirm}
+            disabled={isLoading}
+            aria-busy={isLoading}
+            className={`inline-flex items-center gap-2 rounded-md px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
               tone === "danger" ? "bg-[var(--danger)] hover:bg-red-700" : "bg-[var(--primary)] hover:bg-[var(--primary-deep)]"
             }`}
           >
-            {confirmLabel}
+            {isLoading && <LoaderCircle size={16} className="animate-spin" />}
+            {isLoading ? loadingLabel : confirmLabel}
           </button>
         </div>
       </div>

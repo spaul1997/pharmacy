@@ -191,6 +191,14 @@ const vendorSchema = new mongoose.Schema(
 vendorSchema.index({ tenantId: 1, storeId: 1, phone: 1 });
 vendorSchema.index({ tenantId: 1, storeId: 1, name: 1 });
 vendorSchema.index(
+  { tenantId: 1, name: 1 },
+  {
+    unique: true,
+    name: "unique_supplier_name_per_tenant",
+    collation: { locale: "en", strength: 2 },
+  }
+);
+vendorSchema.index(
   { tenantId: 1, code: 1 },
   { unique: true, partialFilterExpression: { code: { $type: "string" } } }
 );

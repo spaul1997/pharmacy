@@ -414,22 +414,31 @@ export function StockDataProvider({ children, storageScope, token }) {
     return persistInventory(nextInventory);
   }, [persistInventory, setBalances, setBatches, setMovements]);
 
-  function syncMasterStock(changes) {
+  function syncMasterStock(changes, purchaseRates = {}) {
     const rows = masterData.getRows("product-item");
-    Object.entries(changes).forEach(([code, delta]) => {
+    const itemCodes = new Set([...Object.keys(changes), ...Object.keys(purchaseRates)]);
+    return Promise.all([...itemCodes].map((code) => {
+      const delta = Number(changes[code]) || 0;
       const current = rows.find((row) => row.code === code);
-      if (!current || !delta) return;
-      masterData
-        .updateRow("product-item", code, { stock: Math.max(0, (Number(current.stock) || 0) + delta) })
+      if (!current) return null;
+
+      const patch = {};
+      if (delta) patch.stock = Math.max(0, (Number(current.stock) || 0) + delta);
+      if (Object.prototype.hasOwnProperty.call(purchaseRates, code)) patch.purchasePrice = purchaseRates[code];
+      if (Object.keys(patch).length === 0) return null;
+
+      return masterData
+        .updateRow("product-item", code, patch)
         .catch((requestError) => setError(requestError.message || `Unable to update stock for ${code}.`));
-    });
+    }));
   }
 
-  const postStockIn = useCallback((items, { warehouse, reference, user, date, supplier }) => {
+  const postStockIn = useCallback((items, { warehouse, reference, user, date, supplier, updatePurchaseRates = false }) => {
     const current = inventoryRef.current;
     const nextBalances = { ...current.balances };
     const entries = [];
     const changes = {};
+    const purchaseRates = {};
     (items || []).forEach((item) => {
       const qty = Number(item.qty) || 0;
       if (!item.code || !warehouse || qty <= 0) return;
@@ -438,6 +447,10 @@ export function StockDataProvider({ children, storageScope, token }) {
       perWarehouse[warehouse] = newBalance;
       nextBalances[item.code] = perWarehouse;
       changes[item.code] = (changes[item.code] || 0) + qty;
+      const purchaseRate = Number(item.unitCost);
+      if (updatePurchaseRates && item.unitCost !== "" && item.unitCost !== null && item.unitCost !== undefined && Number.isFinite(purchaseRate) && purchaseRate >= 0) {
+        purchaseRates[item.code] = purchaseRate;
+      }
       entries.push({ date, type: "Stock In", item: item.code, batch: item.batch || "", warehouse, qtyIn: qty, qtyOut: 0, balance: newBalance, reference, user });
     });
     const persisted = commitInventory({
@@ -445,8 +458,8 @@ export function StockDataProvider({ children, storageScope, token }) {
       movements: appendMovements(current.movements, entries),
       batches: batchesAfterStockIn(current.batches, items, { warehouse, reference, supplier }),
     });
-    syncMasterStock(changes);
-    return persisted;
+    const masterSync = syncMasterStock(changes, purchaseRates);
+    return Promise.all([persisted, masterSync]).then(([result]) => result);
   }, [commitInventory, masterData]);
 
   const postStockOut = useCallback((items, { warehouse, reference, user, date }) => {

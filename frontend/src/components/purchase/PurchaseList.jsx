@@ -29,7 +29,7 @@ import { useAuth } from "../../stores/AuthStore.jsx";
 
 const money = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const PAGE_SIZE = 5;
-const poCoverageStatuses = new Set(["Pending Approval", "Approved", "Ordered", "Partially Received", "Completed GRN", "Received"]);
+const poCoverageStatuses = new Set(["Draft", "Pending Approval", "Approved", "Ordered", "Partially Received", "Completed GRN", "Received"]);
 
 const summaryTones = {
   primary: "text-[var(--primary)] bg-blue-50",
@@ -57,6 +57,15 @@ function uniqueOptions(values) {
 
 function optionValues(value) {
   return (Array.isArray(value) ? value : [value]).map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+function grnReceivedQty(item) {
+  return Number(item.receivedQty ?? item.unitQty ?? item.acceptedQty) || 0;
+}
+
+function reservesPurchaseOrderReceiptQty(row) {
+  if (["Draft", "Pending Inspection"].includes(row.status)) return true;
+  return row.status === "Completed" && row.stockUpdated !== false;
 }
 
 function RejectionReasonDialog({ open, reason, error, onReasonChange, onConfirm, onCancel }) {
@@ -254,7 +263,25 @@ export function PurchaseList({ entityKey }) {
       return;
     }
     if (action.convertsTo) {
-      navigate(`/purchase-management/${action.convertsTo}/new`, { state: { convertFrom: { entityKey, record: row } } });
+      const conversionRecord = entityKey === "purchase-request" && action.convertsTo === "purchase-order"
+        ? { ...row, items: remainingPurchaseRequestItems(row.id, purchaseOrderCoverageRows()) }
+        : row;
+
+      if (entityKey === "purchase-request" && action.convertsTo === "purchase-order" && conversionRecord.items.length === 0) {
+        showToast("This purchase request is already fully covered by purchase orders.", "error");
+        return;
+      }
+
+      if (
+        entityKey === "purchase-order" &&
+        action.convertsTo === "goods-receipt" &&
+        remainingGoodsReceiptItemsForPurchaseOrder(row).length === 0
+      ) {
+        showToast("This purchase order is already fully covered by goods receipts.", "error");
+        return;
+      }
+
+      navigate(`/purchase-management/${action.convertsTo}/new`, { state: { convertFrom: { entityKey, record: conversionRecord } } });
       return;
     }
     if (action.setStatus) {
@@ -393,40 +420,21 @@ export function PurchaseList({ entityKey }) {
       .filter(Boolean);
   }
 
-  async function updateLinkedPurchaseRequestCoverage(previousRecord, updatedRecord, date, time) {
-    if (entityKey !== "purchase-order") return;
+  function receivedQtyForPurchaseOrderItem(poId, itemCode) {
+    return getRows("goods-receipt")
+      .filter((receipt) => receipt.refPO === poId && reservesPurchaseOrderReceiptQty(receipt))
+      .reduce((sum, receipt) => {
+        return sum + (receipt.items || [])
+          .filter((item) => item.code === itemCode)
+          .reduce((itemSum, item) => itemSum + grnReceivedQty(item), 0);
+      }, 0);
+  }
 
-    const affectedRequestIds = uniqueOptions([...optionValues(previousRecord?.refPR), ...optionValues(updatedRecord?.refPR)]);
-    if (affectedRequestIds.length === 0) return;
-
-    const coverageRows = purchaseOrderCoverageRows({ includeRecord: updatedRecord });
-    await Promise.all(
-      affectedRequestIds.map((requestId) => {
-        const request = getPurchaseRequest(requestId);
-        if (!request || !["Approved", "Received"].includes(request.status)) return Promise.resolve();
-
-        const hasRemaining = remainingPurchaseRequestItems(requestId, coverageRows).length > 0;
-        if (!hasRemaining && request.status !== "Received") {
-          return updateRow("purchase-request", request.id, {
-            status: "Received",
-            receivedBy: authUserName,
-            receivedDate: date,
-            activity: [...(request.activity || []), { event: "Received", date, time, by: authUserName }],
-          });
-        }
-
-        if (hasRemaining && request.status === "Received") {
-          return updateRow("purchase-request", request.id, {
-            status: "Approved",
-            receivedBy: "",
-            receivedDate: "",
-            activity: (request.activity || []).filter((entry) => entry.event !== "Received"),
-          });
-        }
-
-        return Promise.resolve();
-      })
-    );
+  function remainingGoodsReceiptItemsForPurchaseOrder(po) {
+    return (po.items || []).filter((item) => {
+      const orderedQty = Number(item.qty) || 0;
+      return orderedQty > receivedQtyForPurchaseOrderItem(po.id, item.code);
+    });
   }
 
   async function applyStatusChange(action, row, options = {}) {
@@ -442,7 +450,6 @@ export function PurchaseList({ entityKey }) {
 
     try {
       await updateRow(entityKey, row.id, updatedRow);
-      await updateLinkedPurchaseRequestCoverage(row, updatedRow, date, time);
       showToast(`${row.id} marked as ${action.setStatus}.`);
       setConfirmAction(null);
       setReasonAction(null);
@@ -635,6 +642,16 @@ export function PurchaseList({ entityKey }) {
                   const actions = entity.list.rowActions.filter((action) => {
                     if (action.showWhen && !action.showWhen(row)) return false;
                     if (action.hideWhen && action.hideWhen(row)) return false;
+                    if (
+                      entityKey === "purchase-request" &&
+                      action.convertsTo === "purchase-order" &&
+                      remainingPurchaseRequestItems(row.id, purchaseOrderCoverageRows()).length === 0
+                    ) return false;
+                    if (
+                      entityKey === "purchase-order" &&
+                      action.convertsTo === "goods-receipt" &&
+                      remainingGoodsReceiptItemsForPurchaseOrder(row).length === 0
+                    ) return false;
                     return true;
                   });
                   return (

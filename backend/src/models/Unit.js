@@ -99,7 +99,14 @@ const unitSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-unitSchema.index({ tenantId: 1, storeId: 1, name: 1 });
+unitSchema.index(
+  { tenantId: 1, name: 1 },
+  {
+    unique: true,
+    name: "unique_unit_name_per_tenant",
+    collation: { locale: "en", strength: 2 },
+  }
+);
 unitSchema.index(
   { tenantId: 1, code: 1 },
   { unique: true, partialFilterExpression: { code: { $type: "string" } } }

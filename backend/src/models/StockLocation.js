@@ -138,5 +138,13 @@ stockLocationSchema.index(
 stockLocationSchema.index({ tenantId: 1, warehouse: 1 });
 stockLocationSchema.index({ tenantId: 1, type: 1 });
 stockLocationSchema.index({ tenantId: 1, status: 1 });
+stockLocationSchema.index(
+  { tenantId: 1, name: 1, warehouse: 1 },
+  {
+    unique: true,
+    name: "unique_location_name_warehouse_per_tenant",
+    collation: { locale: "en", strength: 2 },
+  }
+);
 
 export default mongoose.model("StockLocation", stockLocationSchema);

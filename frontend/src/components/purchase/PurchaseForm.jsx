@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ArrowLeft, Check, ChevronDown, ChevronRight as Crumb, Paperclip, Plus, Trash2, X } from "lucide-react";
 import { masterEntities } from "../../data/masterManagement.js";
-import { formatDisplayDate, purchaseEntities, materialByCode, lineTotal, poTotals } from "../../data/purchaseManagement.js";
+import { formatDisplayDate, purchaseEntities, materialByCode, lineGstAmount, lineTotal, poTotals } from "../../data/purchaseManagement.js";
 import { ConfirmDialog } from "../ui.jsx";
 import { usePurchaseData } from "./PurchaseDataContext.jsx";
 import { useMasterData } from "../master/MasterDataContext.jsx";
@@ -27,7 +27,7 @@ const dateTimeInputValue = (value) => {
 
 const idPrefixes = { "purchase-request": "PR", "purchase-order": "PO", "goods-receipt": "GRN", "purchase-issue": "PI", "purchase-return": "RET" };
 const editLockedStatuses = ["Approved", "Rejected", "Ordered", "Partially Received", "Completed GRN", "Received", "Issued", "Issue Complete", "Returned", "Cancelled", "Completed"];
-const poCoverageStatuses = new Set(["Pending Approval", "Approved", "Ordered", "Partially Received", "Completed GRN", "Received"]);
+const poCoverageStatuses = new Set(["Draft", "Pending Approval", "Approved", "Ordered", "Partially Received", "Completed GRN", "Received"]);
 
 function nextId(entityKey, rows) {
   const prefix = idPrefixes[entityKey];
@@ -133,6 +133,10 @@ function materialUnitPrice(material) {
   return material?.purchasePrice ?? material?.lastPurchasePrice ?? material?.standardCost ?? material?.price ?? material?.sellingPrice ?? "";
 }
 
+function materialGst(material) {
+  return Number(material?.gst) || 0;
+}
+
 function normalizeFilterValue(value) {
   return String(value || "").trim().toLowerCase();
 }
@@ -171,7 +175,7 @@ function filterItemRows(productRows, department = "", departments = []) {
     if (departmentValues.size > 0 && itemDepartmentValues.length > 0 && !itemDepartmentValues.some((value) => departmentValues.has(value))) return;
     rowsByCode.set(row.code, {
       ...row,
-      unit: row.unit || row.baseUnit || "",
+      unit: row.purchaseUnit || row.unit || row.baseUnit || "",
       price: materialUnitPrice(row),
     });
   });
@@ -180,7 +184,7 @@ function filterItemRows(productRows, department = "", departments = []) {
 
 function materialOptionLabel(material) {
   if (!material?.name) return "";
-  return [material.name, material.code].filter(Boolean).join(" - ");
+  return [material.name, material.brand, material.category].filter(Boolean).join(" - ");
 }
 
 function compositionOptionValue(composition) {
@@ -263,7 +267,7 @@ function MaterialLineItemSelect({ row, disabled, onChange, materialRows = [], co
     const q = query.trim().toLowerCase();
     if (!q || query === selectedLabel) return options;
     return options.filter((material) =>
-      [material.name, material.code, material.genericName, material.composition, material.category, material.productType]
+      [material.name, material.code, material.genericName, material.composition, material.brand, material.category, material.productType]
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q))
     );
@@ -291,10 +295,13 @@ function MaterialLineItemSelect({ row, disabled, onChange, materialRows = [], co
       ...row,
       code: material.code,
       name: material.name || "",
+      brand: material.brand || "",
+      category: material.category || "",
       genericName: material.genericName || "",
       composition: row.composition || material.composition || material.genericName || "",
       unit: material.unit || material.baseUnit || "",
       price: materialUnitPrice(material),
+      tax: materialGst(material),
     });
     setQuery(materialOptionLabel(material));
     setOpen(false);
@@ -305,15 +312,12 @@ function MaterialLineItemSelect({ row, disabled, onChange, materialRows = [], co
     setOpen(true);
 
     if (!value.trim()) {
-      onChange({ ...row, code: "", name: "", unit: "", price: "" });
+      onChange({ ...row, code: "", name: "", brand: "", category: "", unit: "", price: "", tax: 0 });
       return;
     }
 
-    const typedValue = value.split(" - ").pop().trim();
-    if (selectedCodes.has(typedValue)) return;
-
     const matchedMaterial = options.find((material) => materialOptionLabel(material) === value || material.code === value || material.name === value);
-    if (matchedMaterial) selectMaterial(matchedMaterial);
+    if (matchedMaterial && !selectedCodes.has(matchedMaterial.code)) selectMaterial(matchedMaterial);
   }
 
   return (
@@ -358,8 +362,8 @@ function MaterialLineItemSelect({ row, disabled, onChange, materialRows = [], co
               >
                 <span className="block font-medium">{material.name}</span>
                 <span className="block text-xs text-[var(--muted)]">
-                  {material.code}
-                  {material.department ? ` · ${material.department}` : ""}
+                  {material.brand ? `B: ${material.brand}` : "B: —"}
+                  {` · ${material.category ? `C: ${material.category}` : "C: —"}`}
                 </span>
               </button>
             ))
@@ -402,6 +406,7 @@ function LineItemCell({ column, row, disabled, onChange, materialRows = [], comp
             name: "",
             unit: "",
             price: "",
+            tax: 0,
           });
         }}
         className={`${inputClass} min-w-[180px] text-left`}
@@ -488,6 +493,10 @@ function LineItemCell({ column, row, disabled, onChange, materialRows = [], comp
     return <span className="block px-2 py-1.5 text-sm font-medium text-[var(--ink)]">{money.format(lineTotal(row))}</span>;
   }
 
+  if (column.type === "computed-gst-amount") {
+    return <span className="block px-2 py-1.5 text-sm font-medium text-[var(--ink)]">{money.format(lineGstAmount(row))}</span>;
+  }
+
   if (column.type === "computed-grn-net") {
     return <span className={displayClass}>{money.format(grnNetAmount(row))}</span>;
   }
@@ -546,10 +555,10 @@ const lineItemNumericColumnKeys = new Set([
   "price",
   "discount",
   "tax",
+  "gstAmount",
   "total",
   "unitQty",
   "subUnitQty",
-  "testQty",
   "mrp",
   "rate",
   "netAmount",
@@ -713,7 +722,7 @@ function LineItemsField({ field, rows, disabled, onChange, materialRows, composi
                 <span>-{money.format(totals.discount)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-[var(--muted)]">Tax</span>
+                <span className="text-[var(--muted)]">GST</span>
                 <span>{money.format(totals.tax)}</span>
               </div>
               <div className="flex justify-between border-t border-[var(--line)] pt-1 font-semibold text-[var(--ink)]">
@@ -1133,7 +1142,7 @@ function countsAgainstPurchaseOrderReceipt(row) {
 }
 
 function reservesPurchaseOrderReceiptQty(row) {
-  if (row.status === "Pending Inspection") return true;
+  if (["Draft", "Pending Inspection"].includes(row.status)) return true;
   return countsAgainstPurchaseOrderReceipt(row);
 }
 
@@ -1629,7 +1638,18 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
         ...base,
         refPR: [source.id],
         supplier: "",
-        items: source.items.map((item) => hydrateMedicineItem({ code: item.code, name: item.name, qty: item.qty, unit: item.unit, price: item.price ?? (materialUnitPrice(getAnyItem(item.code)) || 0), discount: 0, tax: 12 })),
+        items: source.items.map((item) => {
+          const material = getAnyItem(item.code);
+          return hydrateMedicineItem({
+            code: item.code,
+            name: item.name,
+            qty: item.qty,
+            unit: item.unit,
+            price: item.price ?? (materialUnitPrice(material) || 0),
+            discount: 0,
+            tax: materialGst(material),
+          });
+        }),
       };
     }
     if (convertFrom?.entityKey === "purchase-request" && entityKey === "purchase-issue") {
@@ -1711,6 +1731,8 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
   const [errors, setErrors] = useState({});
   const [errorBanner, setErrorBanner] = useState("");
   const [pendingAction, setPendingAction] = useState(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const actionInProgressRef = useRef(false);
   const [reasonAction, setReasonAction] = useState(null);
   const [rejectionReason, setRejectionReason] = useState("");
   const [rejectionReasonError, setRejectionReasonError] = useState("");
@@ -1999,7 +2021,7 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
           unit: item.unit || material?.unit || material?.baseUnit || "",
           price: item.price ?? materialUnitPrice(material) ?? 0,
           discount: 0,
-          tax: 12,
+          tax: materialGst(material),
           sourcePRAllocations: [{ requestId, qty }],
         });
       });
@@ -2063,7 +2085,6 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
       rejectedQty: 0,
       unitQty: receiptQty,
       unit: item.unit,
-      testQty: "",
       mrp: item.price || 0,
       rate: item.price || 0,
       discountAmount: Math.round(receiptQty * (Number(item.price) || 0) * ((Number(item.discount) || 0) / 100) * 100) / 100,
@@ -2369,6 +2390,25 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
           const hasDuplicateCode = selectedCodes.some((code, index) => selectedCodes.indexOf(code) !== index);
           if (!nextErrors[field.key] && !field.allowDuplicateCodes && hasDuplicateCode) nextErrors[field.key] = "Same item cannot be added more than once.";
 
+          if (!nextErrors[field.key] && entityKey === "purchase-order" && field.key === "items" && optionValues(values.refPR).length > 0) {
+            const coverageRows = purchaseOrderCoverageRows({ excludeId: values.id });
+            const remainingQtyByCode = new Map();
+
+            optionValues(values.refPR).forEach((requestId) => {
+              remainingPurchaseRequestItems(requestId, coverageRows).forEach((item) => {
+                remainingQtyByCode.set(item.code, (remainingQtyByCode.get(item.code) || 0) + (Number(item.qty) || 0));
+              });
+            });
+
+            const overOrderedItem = lineItems.find(
+              (item) => item.code && (Number(item.qty) || 0) > (remainingQtyByCode.get(item.code) || 0)
+            );
+            if (overOrderedItem) {
+              const remainingQty = remainingQtyByCode.get(overOrderedItem.code) || 0;
+              nextErrors[field.key] = `${overOrderedItem.name || overOrderedItem.code} has only ${remainingQty} remaining in the selected purchase request(s).`;
+            }
+          }
+
           if (!nextErrors[field.key] && entityKey === "goods-receipt" && field.key === "items" && values.refPO) {
             const purchaseOrder = purchaseData.getRecord("purchase-order", values.refPO);
             const reservedRows = reservedGoodsReceiptRows({ excludeIds: [recordId, values.id, existingRecord?.id] });
@@ -2432,9 +2472,9 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
     return true;
   }
 
-  function applyStockUpdate(direction, stockRecord = values) {
+  async function applyStockUpdate(direction, stockRecord = values) {
     if (entityKey === "goods-receipt" && direction === "increase") {
-      stockData.postStockIn(
+      await stockData.postStockIn(
         stockRecord.items.map((item) => ({
           code: item.code,
           name: item.name,
@@ -2451,6 +2491,7 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
           supplier: stockRecord.supplier,
           user: authUserName,
           date: stockRecord.date,
+          updatePurchaseRates: true,
         }
       );
       return;
@@ -2458,7 +2499,7 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
 
     if (entityKey === "purchase-issue" && direction === "decrease") {
       const issueWarehouse = stockRecord.warehouse || stockRecord.items.find((item) => item.warehouse)?.warehouse || "Main Pharmacy";
-      stockData.postStockOut(
+      await stockData.postStockOut(
         stockRecord.items.map((item) => ({
           code: item.code,
           name: item.name,
@@ -2478,14 +2519,14 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
       return;
     }
 
-    stockRecord.items.forEach((item) => {
+    await Promise.all(stockRecord.items.map((item) => {
       const masterItemRows = masterData.getRows("product-item");
       const current = masterItemRows.find((r) => r.code === item.code);
-      if (!current) return;
+      if (!current) return null;
       const qty = direction === "increase" ? grnReceivedQty(item) : Number(item.returnQty ?? item.issueQty) || 0;
       const delta = direction === "increase" ? qty : -qty;
-      masterData.updateRow("product-item", item.code, { stock: Math.max(0, (Number(current.stock) || 0) + delta) });
-    });
+      return masterData.updateRow("product-item", item.code, { stock: Math.max(0, (Number(current.stock) || 0) + delta) });
+    }));
   }
 
   function approvalPatch(action, reason = "") {
@@ -2534,42 +2575,6 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
       };
     }
     return {};
-  }
-
-  async function updateLinkedPurchaseRequestCoverage(record) {
-    if (entityKey !== "purchase-order" || record.status === "Draft") return;
-
-    const affectedRequestIds = uniqueOptions([...optionValues(existingRecord?.refPR), ...optionValues(record.refPR)]);
-    if (affectedRequestIds.length === 0) return;
-
-    const coverageRows = purchaseOrderCoverageRows({ includeRecord: record });
-    await Promise.all(
-      affectedRequestIds.map((requestId) => {
-        const request = purchaseData.getRecord("purchase-request", requestId);
-        if (!request || !["Approved", "Received"].includes(request.status)) return Promise.resolve();
-
-        const hasRemaining = remainingPurchaseRequestItems(requestId, coverageRows).length > 0;
-        if (!hasRemaining && request.status !== "Received") {
-          return purchaseData.updateRow("purchase-request", request.id, {
-            status: "Received",
-            receivedBy: authUserName,
-            receivedDate: today(),
-            activity: [...(request.activity || []), { event: "Received", date: today(), time: currentTime(), by: authUserName }],
-          });
-        }
-
-        if (hasRemaining && request.status === "Received") {
-          return purchaseData.updateRow("purchase-request", request.id, {
-            status: "Approved",
-            receivedBy: "",
-            receivedDate: "",
-            activity: (request.activity || []).filter((entry) => entry.event !== "Received"),
-          });
-        }
-
-        return Promise.resolve();
-      })
-    );
   }
 
   async function updateLinkedPurchaseRequestIssueStatus(record) {
@@ -2635,6 +2640,7 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
   }
 
   async function executeAction(action, options = {}) {
+    if (!action || actionInProgressRef.current) return;
     const status = action.status || values.status;
     const recordValues =
       entityKey === "purchase-issue"
@@ -2662,13 +2668,14 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
       activity,
     };
 
+    actionInProgressRef.current = true;
+    setIsSubmitting(true);
     try {
-      if (action.updatesStock && !values.stockUpdated) applyStockUpdate(action.updatesStock, record);
+      if (action.updatesStock && !values.stockUpdated) await applyStockUpdate(action.updatesStock, record);
 
       if (mode === "edit") await purchaseData.updateRow(entityKey, recordId, record);
       else await purchaseData.addRow(entityKey, record);
 
-      await updateLinkedPurchaseRequestCoverage(record);
       await updateLinkedPurchaseRequestIssueStatus(record);
       await updateLinkedPurchaseOrderReceiptStatus(record);
 
@@ -2681,10 +2688,14 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
     } catch (error) {
       setErrorBanner(error.message || `Unable to save ${entity.singular}.`);
       showToast(error.message || `Unable to save ${entity.singular}.`, "error");
+    } finally {
+      actionInProgressRef.current = false;
+      setIsSubmitting(false);
     }
   }
 
   function handleAction(action) {
+    if (actionInProgressRef.current) return;
     if (action.print) {
       window.print();
       return;
@@ -2891,7 +2902,8 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
                 key={action.key}
                 type="button"
                 onClick={() => handleAction(action)}
-                className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold ${
+                disabled={isSubmitting}
+                className={`inline-flex items-center gap-1.5 rounded-md px-4 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60 ${
                   action.tone === "danger" ? "border border-red-200 text-[var(--danger)] hover:bg-red-50" : kindClass[action.kind] || kindClass.outline
                 }`}
               >
@@ -2909,9 +2921,11 @@ export function PurchaseForm({ entityKey, mode, recordId }) {
         title={pendingAction?.confirm || "Are you sure?"}
         message={`This will update ${values.id} to "${pendingAction?.status}".`}
         confirmLabel={pendingAction?.label}
+        loading={isSubmitting}
+        loadingLabel={pendingAction?.updatesStock ? "Updating Stock..." : "Saving..."}
         tone={pendingAction?.tone}
         onConfirm={() => executeAction(pendingAction)}
-        onCancel={() => setPendingAction(null)}
+        onCancel={() => !isSubmitting && setPendingAction(null)}
       />
       <RejectionReasonDialog
         open={Boolean(reasonAction)}

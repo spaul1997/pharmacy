@@ -16,6 +16,7 @@ function slugify(text) {
 const existingRoutes = {
   Medicine: "/master-management/product-item",
   "Medicine Requisition": "/purchase-management/purchase-request",
+  "Purchase Issue": "/purchase-management/purchase-issue",
   "Medicine Category": "/master-management/category",
   "Generic / Composition": "/master-management/generic-composition",
   "Brand Name": "/master-management/brand-name",
@@ -33,7 +34,7 @@ const rawSections = [
   { label: "Dashboard", to: "/dashboard" },
   {
     label: "Purchase Management",
-    children: ["Medicine Requisition", "Purchase Order", "Goods Receipt", "Purchase Return"],
+    children: ["Medicine Requisition", "Purchase Order", "Goods Receipt", "Purchase Issue", "Purchase Return"],
   },
   {
     label: "Stock Management",

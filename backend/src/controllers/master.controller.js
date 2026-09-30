@@ -13,11 +13,42 @@ import WarehouseType from "../models/WarehouseType.js";
 const normalize = (value) => String(value ?? "").trim();
 const normalizeEmail = (value) => normalize(value).toLowerCase();
 const DEFAULT_PRODUCT_TYPE = "Other";
+const CASE_INSENSITIVE_COLLATION = { locale: "en", strength: 2 };
 
 const formatDuplicateError = (error) => {
   if (error?.code !== 11000) return null;
 
-  const field = Object.keys(error.keyPattern || error.keyValue || {})[0] || "record";
+  const fields = Object.keys(error.keyPattern || error.keyValue || {});
+  const duplicateIndex = `${error.index || ""} ${error.message || ""}`;
+  if (fields.includes("name") && fields.includes("bank")) {
+    return "This Payment Mode and Bank combination already exists.";
+  }
+  if (fields.includes("name") && fields.includes("warehouse")) {
+    return "This Location Name and Warehouse combination already exists.";
+  }
+  if (fields.includes("name") && fields.includes("manufacturer")) {
+    return "This Brand Name and Manufacturer combination already exists.";
+  }
+  if (fields.includes("storeName")) {
+    return "This Warehouse Name already exists.";
+  }
+  if (duplicateIndex.includes("unique_manufacturer_name_per_tenant")) {
+    return "This Manufacturer Name already exists.";
+  }
+  if (fields.includes("entity") && fields.includes("name")) {
+    return "This Customer Type already exists.";
+  }
+  if (duplicateIndex.includes("unique_supplier_name_per_tenant")) {
+    return "This Supplier Name already exists.";
+  }
+  if (fields.includes("name")) {
+    return "This Unit Name already exists.";
+  }
+  if (fields.includes("rate")) {
+    return "This GST Rate already exists.";
+  }
+
+  const field = fields.find((key) => !["tenantId", "storeId", "entity"].includes(key)) || "record";
   return `${field} already exists.`;
 };
 
@@ -404,7 +435,6 @@ const unitPatch = (body) => {
 };
 
 const vendorTextFields = [
-  "category",
   "type",
   "website",
   "contact",
@@ -428,7 +458,6 @@ const serializeSupplier = (supplier) => ({
   id: supplier.id,
   code: supplier.code,
   name: supplier.name,
-  category: supplier.category || "",
   type: supplier.type || "",
   website: supplier.website || "",
   contact: supplier.contact || "",
@@ -685,6 +714,7 @@ const masterRecordFields = [
   "drugLicense",
   "phone",
   "bank",
+  "addressRequired",
 ];
 
 const serializeMasterRecord = (record) => ({
@@ -699,6 +729,7 @@ const serializeMasterRecord = (record) => ({
   email: record.email || "",
   rate: record.rate ?? 0,
   bank: record.bank || "",
+  addressRequired: record.addressRequired || "No",
   status: record.status || "Active",
   createdAt: record.createdAt,
   updatedAt: record.updatedAt,
@@ -750,19 +781,33 @@ const masterEntityApis = {
     requiredActive: ["composition"],
     requiredMessage: "Generic name and composition are required.",
   }),
-  "brand-names": pharmacyMasterConfig("brand-names", "BRD"),
-  manufacturers: pharmacyMasterConfig("manufacturers", "MFR"),
+  "brand-names": pharmacyMasterConfig("brand-names", "BRD", {
+    uniqueTogether: ["name", "manufacturer"],
+    uniqueTogetherMessage: "This Brand Name and Manufacturer combination already exists.",
+  }),
+  manufacturers: pharmacyMasterConfig("manufacturers", "MFR", {
+    uniqueTogether: ["name"],
+    uniqueTogetherMessage: "This Manufacturer Name already exists.",
+  }),
   "customer-types": pharmacyMasterConfig("customer-types", "CT", {
     autoCode: { prefix: "CT", width: 2, startAt: 1 },
+    requiredActive: ["addressRequired"],
+    requiredMessage: "Customer type and address requirement are required.",
+    uniqueTogether: ["name"],
+    uniqueTogetherMessage: "This Customer Type already exists.",
   }),
   "tax-rates": pharmacyMasterConfig("tax-rates", "GST", {
     autoCode: { prefix: "GST", width: 2, startAt: 1 },
     patch: taxRatePatch,
     requiredMessage: "GST rate is required.",
     draftMessage: "GST rate is required.",
+    uniqueTogether: ["rate"],
+    uniqueTogetherMessage: "This GST Rate already exists.",
   }),
   "payment-modes": pharmacyMasterConfig("payment-modes", "PAY", {
     autoCode: { prefix: "PAY", width: 2, startAt: 1 },
+    uniqueTogether: ["name", "bank"],
+    uniqueTogetherMessage: "This Payment Mode and Bank combination already exists.",
   }),
   "raw-materials": {
     Model: RawMaterial,
@@ -782,9 +827,11 @@ const masterEntityApis = {
     sort: { createdAt: -1, code: 1 },
     autoCode: { prefix: "UOM", width: 2 },
     requiredDraft: ["name"],
-    requiredActive: ["type"],
-    requiredMessage: "Unit name and unit type are required.",
+    requiredActive: [],
+    requiredMessage: "Unit name is required.",
     draftMessage: "Unit name is required.",
+    uniqueTogether: ["name"],
+    uniqueTogetherMessage: "This Unit Name already exists.",
   },
   suppliers: {
     Model: Vendor,
@@ -793,9 +840,11 @@ const masterEntityApis = {
     sort: { createdAt: -1, code: 1 },
     autoCode: { prefix: "SUP", width: 3, startAt: 101 },
     requiredDraft: ["name"],
-    requiredActive: ["category", "contact", "phone"],
-    requiredMessage: "Supplier name, category, contact person, and phone are required.",
+    requiredActive: ["type", "contact", "phone"],
+    requiredMessage: "Supplier name, supplier type, contact person, and phone are required.",
     draftMessage: "Supplier name is required.",
+    uniqueTogether: ["name"],
+    uniqueTogetherMessage: "This Supplier Name already exists.",
   },
   "warehouse-types": {
     Model: WarehouseType,
@@ -840,6 +889,8 @@ const masterEntityApis = {
     requiredActive: [],
     requiredMessage: "Warehouse name is required.",
     draftMessage: "Warehouse name is required.",
+    uniqueTogether: ["storeName"],
+    uniqueTogetherMessage: "This Warehouse Name already exists.",
   },
   "stock-locations": {
     Model: StockLocation,
@@ -851,6 +902,8 @@ const masterEntityApis = {
     requiredActive: ["warehouse"],
     requiredMessage: "Location name and warehouse are required.",
     draftMessage: "Location name is required.",
+    uniqueTogether: ["name", "warehouse"],
+    uniqueTogetherMessage: "This Location Name and Warehouse combination already exists.",
   },
 };
 
@@ -864,6 +917,24 @@ const validateMasterPatch = (patch, config) => {
   }
 
   return "";
+};
+
+const hasUniqueTogetherConflict = async (config, tenantId, values, excludeCode = "") => {
+  if (!config.uniqueTogether?.length) return false;
+
+  const query = {
+    tenantId,
+    ...(config.filter || {}),
+  };
+
+  config.uniqueTogether.forEach((field) => {
+    query[field] = normalize(values[field]);
+  });
+
+  if (excludeCode) query.code = { $ne: excludeCode };
+
+  const match = await config.Model.exists(query).collation(CASE_INSENSITIVE_COLLATION);
+  return Boolean(match);
 };
 
 export async function listProductItems(req, res, next) {
@@ -999,7 +1070,7 @@ export async function createCategory(req, res, next) {
     }
 
     if (!patch.type) {
-      patch.type = "Product";
+      patch.type = "Medicines";
     }
 
     const category = await Category.create({
@@ -1111,6 +1182,10 @@ export async function createMasterRow(req, res, next) {
       }
     }
 
+    if (await hasUniqueTogetherConflict(config, req.auth.tenantId, patch)) {
+      return res.status(409).json({ message: config.uniqueTogetherMessage });
+    }
+
     const row = await config.Model.create({
       tenantId: req.auth.tenantId,
       storeId: req.auth.storeId || null,
@@ -1154,6 +1229,28 @@ export async function updateMasterRow(req, res, next) {
       const warehouseMessage = await validateStockLocationWarehouse(req.auth.tenantId, patch.warehouse);
       if (warehouseMessage) {
         return res.status(400).json({ message: warehouseMessage });
+      }
+    }
+
+    if (config.uniqueTogether?.length) {
+      let uniqueValues = patch;
+
+      if (config.uniqueTogether.some((field) => patch[field] === undefined)) {
+        const currentRow = await config.Model.findOne({
+          tenantId: req.auth.tenantId,
+          ...(config.filter || {}),
+          code: currentCode,
+        }).lean();
+
+        if (!currentRow) {
+          return res.status(404).json({ message: "Master record not found." });
+        }
+
+        uniqueValues = { ...currentRow, ...patch };
+      }
+
+      if (await hasUniqueTogetherConflict(config, req.auth.tenantId, uniqueValues, currentCode)) {
+        return res.status(409).json({ message: config.uniqueTogetherMessage });
       }
     }
 

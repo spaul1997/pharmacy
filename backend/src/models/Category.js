@@ -36,7 +36,22 @@ const categorySchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["Product", "Material", "Supplier"],
+      enum: [
+        "Medicines",
+        "Medical Consumables",
+        "Surgical Instruments",
+        "Medical Devices & Equipment",
+        "Diagnostic & Laboratory Products",
+        "Nutrition & Dietary Supplements",
+        "Personal Care & Hygiene",
+        "Orthopaedic & Rehabilitation Products",
+        "Maternal & Baby Care",
+        "Disinfectants & Cleaning Supplies",
+        // Retained so existing records created by older versions remain editable.
+        "Product",
+        "Material",
+        "Supplier",
+      ],
       required: true,
     },
 
