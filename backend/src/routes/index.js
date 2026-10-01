@@ -32,6 +32,20 @@ import {
   updateStockDocument,
   updateStockState,
 } from "../controllers/stockManagement.controller.js";
+import {
+  createBill,
+  createCustomer,
+  createSalesOrder,
+  deleteBill,
+  deleteCustomer,
+  deleteSalesOrder,
+  listBillCustomers,
+  listBills,
+  listSalesOrders,
+  updateBill,
+  updateCustomer,
+  updateSalesOrder,
+} from "../controllers/sales.controller.js";
 
 const router = Router();
 
@@ -389,6 +403,30 @@ router.get("/stock-management/documents/:entityKey", requireAuth, requireCompany
 router.post("/stock-management/documents/:entityKey", requireAuth, requireCompanyUser, createStockDocument);
 
 router.put("/stock-management/documents/:entityKey/:id", requireAuth, requireCompanyUser, updateStockDocument);
+
+router.get("/sales/bills", requireAuth, requireCompanyUser, listBills);
+
+router.post("/sales/bills", requireAuth, requireCompanyUser, createBill);
+
+router.put("/sales/bills/:id", requireAuth, requireCompanyUser, updateBill);
+
+router.delete("/sales/bills/:id", requireAuth, requireCompanyUser, deleteBill);
+
+router.get("/sales/orders", requireAuth, requireCompanyUser, listSalesOrders);
+
+router.post("/sales/orders", requireAuth, requireCompanyUser, createSalesOrder);
+
+router.put("/sales/orders/:id", requireAuth, requireCompanyUser, updateSalesOrder);
+
+router.delete("/sales/orders/:id", requireAuth, requireCompanyUser, deleteSalesOrder);
+
+router.get("/sales/customers", requireAuth, requireCompanyUser, listBillCustomers);
+
+router.post("/sales/customers", requireAuth, requireCompanyUser, createCustomer);
+
+router.put("/sales/customers/:code", requireAuth, requireCompanyUser, updateCustomer);
+
+router.delete("/sales/customers/:code", requireAuth, requireCompanyUser, deleteCustomer);
 
 router.get("/saas-admin/dashboard", requireSpecialAdmin, async (req, res, next) => {
   try {

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { AlertCircle, ChevronRight as Crumb, Plus, Trash2 } from "lucide-react";
 import { customerTypes, customerCategories, indianStates, paymentTermsOptions, salesRoles, nextId, today, now, money0, number } from "../../data/sales/shared.js";
@@ -241,8 +241,13 @@ export function CustomerProfile({ mode, recordId }) {
     };
   });
 
+  useEffect(() => {
+    if (!isCreate && existingRecord) setValues({ ...existingRecord });
+  }, [existingRecord, isCreate]);
+
   const [activeTab, setActiveTab] = useState("overview");
   const [errorBanner, setErrorBanner] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const outstanding = useCustomerOutstanding(values.code);
   const disabled = isView;
 
@@ -259,19 +264,28 @@ export function CustomerProfile({ mode, recordId }) {
     return true;
   }
 
-  function handleSave() {
-    if (!validate()) return;
+  async function handleSave() {
+    if (isSaving || !validate()) return;
     const record = { ...values, updatedBy: "You", updatedAt: now() };
-    if (isCreate) {
-      record.createdBy = "You";
-      record.createdAt = now();
-      salesData.addRow("customer-management", record);
-    } else {
-      salesData.updateRow("customer-management", values.code, record);
+    setIsSaving(true);
+    try {
+      let savedRecord;
+      if (isCreate) {
+        record.createdBy = "You";
+        record.createdAt = now();
+        savedRecord = await salesData.addRow("customer-management", record);
+      } else {
+        savedRecord = await salesData.updateRow("customer-management", values.code, record);
+      }
+      const nextRecord = savedRecord || record;
+      setValues(nextRecord);
+      showToast(`${nextRecord.code} saved.`);
+      navigate(isCreate ? `/sales/customer-management/${nextRecord.code}/view` : "/sales/customer-management");
+    } catch (error) {
+      setErrorBanner(error.message || "Unable to save the customer.");
+    } finally {
+      setIsSaving(false);
     }
-    setValues(record);
-    showToast(`${record.code} saved.`);
-    navigate(isCreate ? `/sales/customer-management/${record.code}/view` : "/sales/customer-management");
   }
 
   const salesOrders = salesData.getRows("sales-order").filter((r) => r.customerId === values.code);
@@ -590,8 +604,8 @@ export function CustomerProfile({ mode, recordId }) {
           </>
         )}
         {!isView && (
-          <button type="button" onClick={handleSave} className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
-            Save Customer
+          <button type="button" disabled={isSaving} onClick={handleSave} className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)] disabled:cursor-not-allowed disabled:opacity-60">
+            {isSaving ? "Saving..." : "Save Customer"}
           </button>
         )}
       </div>

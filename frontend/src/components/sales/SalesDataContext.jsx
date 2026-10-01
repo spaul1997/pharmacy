@@ -1,7 +1,21 @@
-import React, { createContext, useCallback, useContext, useMemo } from "react";
+import React, { createContext, useCallback, useContext, useEffect, useMemo } from "react";
 import { salesEntities } from "../../data/sales/entities.js";
 import { computeOrderTotals, today } from "../../data/sales/shared.js";
 import { useScopedState } from "../../lib/scopedStorage.js";
+import {
+  createSalesCustomer,
+  createSalesBill,
+  createSalesOrder,
+  deleteSalesCustomer,
+  deleteSalesBill,
+  deleteSalesOrder,
+  listSalesBills,
+  listSalesCustomers,
+  listSalesOrders,
+  updateSalesCustomer,
+  updateSalesBill,
+  updateSalesOrder,
+} from "../../services/salesService.js";
 import { useMasterData } from "../master/MasterDataContext.jsx";
 
 const SalesDataContext = createContext(null);
@@ -44,25 +58,135 @@ function initialReservedQty() {
   return {};
 }
 
-export function SalesDataProvider({ children, storageScope }) {
+function customerIdentity(row) {
+  const phone = String(row?.mobile || row?.phone || "").replace(/\D/g, "").slice(-10);
+  return phone || String(row?.name || "").trim().toLowerCase();
+}
+
+function mergeCustomers(remoteRows, existingRows) {
+  const remoteCodes = new Set(remoteRows.map(keyOf));
+  const remoteIdentities = new Set(remoteRows.map(customerIdentity).filter(Boolean));
+  return [
+    ...remoteRows,
+    ...existingRows.filter((row) => !remoteCodes.has(keyOf(row)) && !remoteIdentities.has(customerIdentity(row))),
+  ];
+}
+
+export function SalesDataProvider({ children, storageScope, token }) {
   const masterData = useMasterData();
   const [data, setData] = useScopedState(storageScope, "sales-data", initialEntityState);
   const [reservedQty, setReservedQty] = useScopedState(storageScope, "sales-reserved-qty", initialReservedQty);
 
+  useEffect(() => {
+    if (!token || !storageScope) return undefined;
+    let mounted = true;
+
+    Promise.allSettled([listSalesBills(token), listSalesOrders(token), listSalesCustomers(token)]).then(([billResult, orderResult, customerResult]) => {
+      if (!mounted) return;
+      setData((prev) => {
+        const next = { ...prev };
+        if (billResult.status === "fulfilled" || orderResult.status === "fulfilled") {
+          const remoteBillIds = new Set(billResult.status === "fulfilled" ? billResult.value.map(keyOf) : []);
+          const pendingApiBills = (prev["sales-order"] || []).filter(
+            (row) => row.source === "Create Bill" && row.apiId && !remoteBillIds.has(keyOf(row))
+          );
+          const remoteOrderIds = new Set(orderResult.status === "fulfilled" ? orderResult.value.map(keyOf) : []);
+          const pendingApiOrders = (prev["sales-order"] || []).filter(
+            (row) => row.source === "Sales Order" && row.apiId && !remoteOrderIds.has(keyOf(row))
+          );
+          const billRows = billResult.status === "fulfilled"
+            ? [...billResult.value, ...pendingApiBills]
+            : (prev["sales-order"] || []).filter((row) => row.source === "Create Bill");
+          const orderRows = orderResult.status === "fulfilled"
+            ? [...orderResult.value, ...pendingApiOrders]
+            : (prev["sales-order"] || []).filter((row) => row.source !== "Create Bill");
+          next["sales-order"] = [...billRows, ...orderRows];
+        }
+        if (customerResult.status === "fulfilled") {
+          next["customer-management"] = customerResult.value;
+        }
+        return next;
+      });
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, [setData, storageScope, token]);
+
   const getRows = useCallback((entityKey) => data[entityKey] || [], [data]);
   const getRecord = useCallback((entityKey, id) => (data[entityKey] || []).find((row) => keyOf(row) === id), [data]);
 
-  const addRow = useCallback((entityKey, record) => {
-    setData((prev) => ({ ...prev, [entityKey]: [{ ...record }, ...prev[entityKey]] }));
-  }, []);
+  const addRow = useCallback(async (entityKey, record) => {
+    if (token && entityKey === "customer-management") {
+      const row = await createSalesCustomer(record, token);
+      setData((prev) => ({ ...prev, [entityKey]: [row, ...(prev[entityKey] || []).filter((item) => keyOf(item) !== keyOf(row))] }));
+      return row;
+    }
+    if (token && entityKey === "sales-order" && record.source === "Create Bill") {
+      const result = await createSalesBill(record, token);
+      setData((prev) => ({
+        ...prev,
+        "sales-order": [result.row, ...(prev["sales-order"] || []).filter((row) => keyOf(row) !== keyOf(result.row))],
+        ...(result.customer
+          ? { "customer-management": mergeCustomers([result.customer], prev["customer-management"] || []) }
+          : {}),
+      }));
+      return result.row;
+    }
+    if (token && entityKey === "sales-order") {
+      const row = await createSalesOrder({ ...record, source: "Sales Order" }, token);
+      setData((prev) => ({ ...prev, [entityKey]: [row, ...(prev[entityKey] || []).filter((item) => keyOf(item) !== keyOf(row))] }));
+      return row;
+    }
 
-  const updateRow = useCallback((entityKey, id, patch) => {
-    setData((prev) => ({ ...prev, [entityKey]: prev[entityKey].map((row) => (keyOf(row) === id ? { ...row, ...patch } : row)) }));
-  }, []);
+    setData((prev) => ({ ...prev, [entityKey]: [{ ...record }, ...(prev[entityKey] || [])] }));
+    return record;
+  }, [setData, token]);
 
-  const removeRow = useCallback((entityKey, id) => {
-    setData((prev) => ({ ...prev, [entityKey]: prev[entityKey].filter((row) => keyOf(row) !== id) }));
-  }, []);
+  const updateRow = useCallback(async (entityKey, id, patch) => {
+    const existing = (data[entityKey] || []).find((row) => keyOf(row) === id);
+    const merged = existing ? { ...existing, ...patch } : patch;
+    if (token && entityKey === "customer-management") {
+      const row = await updateSalesCustomer(id, merged, token);
+      setData((prev) => ({ ...prev, [entityKey]: (prev[entityKey] || []).map((item) => (keyOf(item) === id ? row : item)) }));
+      return row;
+    }
+    if (token && entityKey === "sales-order" && existing?.source === "Create Bill") {
+      const result = await updateSalesBill(id, merged, token);
+      setData((prev) => ({
+        ...prev,
+        [entityKey]: (prev[entityKey] || []).map((row) => (keyOf(row) === id ? result.row : row)),
+        ...(result.customer
+          ? { "customer-management": mergeCustomers([result.customer], prev["customer-management"] || []) }
+          : {}),
+      }));
+      return result.row;
+    }
+    if (token && entityKey === "sales-order") {
+      const row = await updateSalesOrder(id, merged, token);
+      setData((prev) => ({ ...prev, [entityKey]: (prev[entityKey] || []).map((item) => (keyOf(item) === id ? row : item)) }));
+      return row;
+    }
+
+    setData((prev) => ({
+      ...prev,
+      [entityKey]: (prev[entityKey] || []).map((row) => (keyOf(row) === id ? { ...row, ...patch } : row)),
+    }));
+    return merged;
+  }, [data, setData, token]);
+
+  const removeRow = useCallback(async (entityKey, id) => {
+    const existing = (data[entityKey] || []).find((row) => keyOf(row) === id);
+    if (token && entityKey === "customer-management") {
+      await deleteSalesCustomer(id, token);
+    } else if (token && entityKey === "sales-order" && existing?.source === "Create Bill") {
+      await deleteSalesBill(id, token);
+    } else if (token && entityKey === "sales-order") {
+      await deleteSalesOrder(id, token);
+    }
+    setData((prev) => ({ ...prev, [entityKey]: (prev[entityKey] || []).filter((row) => keyOf(row) !== id) }));
+  }, [data, setData, token]);
 
   const getProduct = useCallback((code) => masterData.getRows("product-item").find((p) => p.code === code), [masterData]);
   const getAvailableToAllocate = useCallback((code) => Math.max(0, (Number(getProduct(code)?.stock) || 0) - (Number(reservedQty[code]) || 0)), [getProduct, reservedQty]);

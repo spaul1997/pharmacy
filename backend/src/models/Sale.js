@@ -5,8 +5,17 @@ const saleItemSchema = new mongoose.Schema(
     productId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product",
-      required: true,
+      default: null,
     },
+
+    productCode: { type: String, required: true, trim: true },
+    productName: { type: String, default: "", trim: true },
+    genericName: { type: String, default: "", trim: true },
+    category: { type: String, default: "", trim: true },
+    location: { type: String, default: "", trim: true },
+    composition: { type: String, default: "", trim: true },
+    hsn: { type: String, default: "", trim: true },
+    uom: { type: String, default: "", trim: true },
 
     batchId: {
       type: mongoose.Schema.Types.ObjectId,
@@ -55,10 +64,27 @@ const saleItemSchema = new mongoose.Schema(
       default: 0,
     },
 
+    discountPercent: { type: Number, default: 0 },
+    taxableValue: { type: Number, default: 0 },
+    cgstAmount: { type: Number, default: 0 },
+    sgstAmount: { type: Number, default: 0 },
+    igstAmount: { type: Number, default: 0 },
+
     total: {
       type: Number,
       required: true,
     },
+  },
+  { _id: false }
+);
+
+const salePaymentSchema = new mongoose.Schema(
+  {
+    date: { type: String, default: "" },
+    mode: { type: String, required: true, trim: true },
+    amount: { type: Number, required: true, min: 0 },
+    reference: { type: String, default: "", trim: true },
+    notes: { type: String, default: "", trim: true },
   },
   { _id: false }
 );
@@ -75,7 +101,7 @@ const saleSchema = new mongoose.Schema(
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
-      required: true,
+      default: null,
       index: true,
     },
 
@@ -89,6 +115,16 @@ const saleSchema = new mongoose.Schema(
       ref: "Customer",
       default: null,
     },
+
+    customerName: { type: String, required: true, trim: true },
+    customerMobile: { type: String, default: "", trim: true },
+    customerType: { type: String, default: "", trim: true },
+    billingAddress: { type: String, default: "", trim: true },
+    shippingAddress: { type: String, default: "", trim: true },
+    destinationState: { type: String, default: "", trim: true },
+    district: { type: String, default: "", trim: true },
+    pin: { type: String, default: "", trim: true },
+    gstin: { type: String, default: "", trim: true },
 
     saleDate: {
       type: Date,
@@ -117,6 +153,11 @@ const saleSchema = new mongoose.Schema(
       default: 0,
     },
 
+    freight: { type: Number, default: 0 },
+    packing: { type: Number, default: 0 },
+    other: { type: Number, default: 0 },
+    roundOff: { type: Number, default: 0 },
+
     paidAmount: {
       type: Number,
       default: 0,
@@ -135,9 +176,13 @@ const saleSchema = new mongoose.Schema(
 
     paymentStatus: {
       type: String,
-      enum: ["paid", "partial", "unpaid"],
-      default: "paid",
+      enum: ["paid", "partial", "unpaid", "Paid", "Partially Paid", "Unpaid"],
+      default: "unpaid",
     },
+
+    payments: [salePaymentSchema],
+
+    source: { type: String, default: "Create Bill", trim: true },
 
     prescription: {
       isRequired: {
@@ -168,8 +213,13 @@ const saleSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["completed", "cancelled"],
-      default: "completed",
+      default: "Draft",
+      trim: true,
+    },
+
+    data: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     createdBy: {

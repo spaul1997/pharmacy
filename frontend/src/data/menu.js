@@ -28,6 +28,7 @@ const existingRoutes = {
   "Store / Warehouse": "/master-management/warehouse",
   "Rack / Location": "/master-management/stock-location",
   "Payment Mode": "/master-management/payment-mode",
+  Customers: "/sales/customer-management",
 };
 
 const rawSections = [
@@ -43,7 +44,7 @@ const rawSections = [
   {
     label: "Pharmacy Sales",
     slug: "sales",
-    children: ["Customer Management", "Create Bill", "Sales Order", "Product Allocation", "Delivery / Dispatch", "Sales Invoice", "Sales Return"],
+    children: ["Create Bill", "Sales Order", "Customers", "Delivery / Dispatch", "Payment Receipt", "Sales Return"],
   },
   {
     label: "Medicine Reports",

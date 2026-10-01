@@ -12,13 +12,26 @@ const customerSchema = new mongoose.Schema(
     storeId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Store",
-      required: true,
+      default: null,
+      index: true,
+    },
+
+    code: {
+      type: String,
+      default: "",
+      trim: true,
       index: true,
     },
 
     name: {
       type: String,
       required: true,
+      trim: true,
+    },
+
+    customerType: {
+      type: String,
+      default: "",
       trim: true,
     },
 
@@ -39,6 +52,12 @@ const customerSchema = new mongoose.Schema(
       default: "",
     },
 
+    billingCity: { type: String, default: "", trim: true },
+    billingDistrict: { type: String, default: "", trim: true },
+    billingState: { type: String, default: "", trim: true },
+    billingPostalCode: { type: String, default: "", trim: true },
+    gstin: { type: String, default: "", trim: true },
+
     openingBalance: {
       type: Number,
       default: 0,
@@ -53,6 +72,11 @@ const customerSchema = new mongoose.Schema(
       type: String,
       enum: ["active", "inactive"],
       default: "active",
+    },
+
+    data: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
 
     createdBy: {

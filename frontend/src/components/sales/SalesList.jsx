@@ -67,6 +67,9 @@ export function SalesList({ entityKey }) {
   const showToast = useToast();
   const navigate = useNavigate();
   const rows = getRows(entityKey);
+  const filterOptions = (filter) => filter.optionsFromRows
+    ? [...new Set(rows.map((row) => String(row[filter.key] || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+    : (filter.options || []);
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -168,20 +171,24 @@ export function SalesList({ entityKey }) {
     }
   }
 
-  function applyAction(action, row) {
+  async function applyAction(action, row) {
     const key = keyOf(row);
-    if (action.remove) {
-      removeRow(entityKey, key);
-      showToast(`${key} deleted.`);
+    try {
+      if (action.remove) {
+        await removeRow(entityKey, key);
+        showToast(`${key} deleted.`);
+        setConfirmAction(null);
+        return;
+      }
+      await updateRow(entityKey, key, {
+        status: action.setStatus,
+        activity: row.activity ? [...row.activity, { event: action.setStatus, date: new Date().toISOString().slice(0, 10), by: "You" }] : undefined,
+      });
+      showToast(`${key} marked as ${action.setStatus}.`);
       setConfirmAction(null);
-      return;
+    } catch (error) {
+      showToast(error.message || `Unable to update ${key}.`);
     }
-    updateRow(entityKey, key, {
-      status: action.setStatus,
-      activity: row.activity ? [...row.activity, { event: action.setStatus, date: new Date().toISOString().slice(0, 10), by: "You" }] : undefined,
-    });
-    showToast(`${key} marked as ${action.setStatus}.`);
-    setConfirmAction(null);
   }
 
   return (
@@ -251,7 +258,7 @@ export function SalesList({ entityKey }) {
               className="rounded-md border border-[var(--line)] bg-white px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--primary)]"
             >
               <option value="">{filter.label}: All</option>
-              {filter.options.map((option) => (
+              {filterOptions(filter).map((option) => (
                 <option key={option} value={option}>
                   {option}
                 </option>

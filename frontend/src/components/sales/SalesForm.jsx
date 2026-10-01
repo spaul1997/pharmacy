@@ -1,8 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { AlertCircle, ArrowLeft, ChevronRight as Crumb, Paperclip, Plus, ReceiptIndianRupee, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight as Crumb, Paperclip, Plus, ReceiptIndianRupee, Trash2 } from "lucide-react";
 import { salesEntities } from "../../data/sales/entities.js";
-import { COMPANY_STATE, computeLineTax, computeOrderTotals, indianStates, localDateTimeNow, money, money0, nextId, nextMonthlyId, paymentTermsOptions, today, now } from "../../data/sales/shared.js";
+import { COMPANY_STATE, computeLineTax, computeOrderTotals, localDateTimeNow, money, money0, nextId, nextMonthlyId, today, now } from "../../data/sales/shared.js";
 import { computeCustomerOutstanding } from "./salesUtils.js";
 import { ConfirmDialog } from "../ui.jsx";
 import { AuditStrip } from "../manufacturing/AuditStrip.jsx";
@@ -33,8 +34,212 @@ function productUnit(product) {
   return product?.salesUnit || product?.unit || product?.baseUnit || "";
 }
 
+function productLocation(product) {
+  return product?.defaultLocation || product?.location || product?.stockLocation || product?.warehouse || "";
+}
+
+function productOptionDetails(product) {
+  const details = [
+    `G: ${product?.genericName || product?.composition || ""}`,
+    `C: ${product?.category || ""}`,
+  ];
+  const location = productLocation(product);
+  if (location) details.push(`L: ${location}`);
+  return details.join(", ");
+}
+
+function MedicineSelect({ options, value, disabled, placeholder, onChange }) {
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState(null);
+  const [hoverStyle, setHoverStyle] = useState(null);
+  const containerRef = useRef(null);
+  const listRef = useRef(null);
+  const selected = options.find((product) => product.code === value);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!containerRef.current?.contains(event.target) && !listRef.current?.contains(event.target)) setOpen(false);
+    }
+    // Render the list in a fixed-position portal so it floats over the table
+    // instead of stretching the row (and isn't clipped by overflow-x-auto).
+    function positionMenu() {
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const menuHeight = 256;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const openUp = spaceBelow < menuHeight + 8 && rect.top > spaceBelow;
+      setMenuStyle({
+        position: "fixed",
+        left: rect.left,
+        width: rect.width,
+        ...(openUp ? { bottom: window.innerHeight - rect.top + 4 } : { top: rect.bottom + 4 }),
+      });
+    }
+    positionMenu();
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    window.addEventListener("scroll", positionMenu, true);
+    window.addEventListener("resize", positionMenu);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      window.removeEventListener("scroll", positionMenu, true);
+      window.removeEventListener("resize", positionMenu);
+    };
+  }, [open]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full min-w-0"
+      onMouseEnter={() => {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (!selected || open || !rect) return;
+        setHoverStyle({ position: "fixed", left: rect.left, top: rect.bottom + 4, maxWidth: Math.max(rect.width, 280) });
+      }}
+      onMouseLeave={() => setHoverStyle(null)}
+    >
+      <button
+        type="button"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => {
+          setHoverStyle(null);
+          setOpen((current) => !current);
+        }}
+        className="flex w-full items-center justify-between gap-2 rounded border border-[var(--line)] bg-white px-2 py-1.5 text-left text-sm outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-[var(--muted)]"
+      >
+        {selected ? (
+          <span className="min-w-0 truncate text-sm font-medium text-[var(--ink)]">{selected.name || "Unnamed medicine"}</span>
+        ) : (
+          <span className="text-sm text-[var(--muted)]">{placeholder}</span>
+        )}
+        <ChevronDown size={16} className={`shrink-0 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {hoverStyle && selected && !open && createPortal(
+        <div role="tooltip" style={hoverStyle} className="pointer-events-none z-50 rounded-md border border-[var(--line)] bg-white px-2.5 py-1.5 shadow-lg">
+          <span className="block text-sm font-medium text-[var(--ink)]">{selected.name || "Unnamed medicine"}</span>
+          <span className="block text-xs text-[var(--muted)]">{productOptionDetails(selected)}</span>
+        </div>,
+        document.body
+      )}
+      {open && !disabled && menuStyle && createPortal(
+        <div ref={listRef} role="listbox" style={menuStyle} className="z-50 max-h-64 overflow-y-auto rounded-md border border-[var(--line)] bg-white p-1 shadow-lg">
+          {options.length === 0 ? (
+            <p className="px-2.5 py-3 text-sm text-[var(--muted)]">No medicines available.</p>
+          ) : options.map((product) => (
+            <button
+              key={product.code}
+              type="button"
+              role="option"
+              aria-selected={product.code === value}
+              onClick={() => {
+                onChange(product.code);
+                setOpen(false);
+              }}
+              className={`block w-full rounded px-2.5 py-2 text-left hover:bg-slate-50 ${product.code === value ? "bg-blue-50" : ""}`}
+            >
+              <span className="block text-sm font-medium text-[var(--ink)]">{product.name || "Unnamed medicine"}</span>
+              <span className="block text-xs text-[var(--muted)]">{productOptionDetails(product)}</span>
+            </button>
+          ))}
+        </div>,
+        document.body
+      )}
+    </div>
+  );
+}
+
+function CustomerAutocomplete({ field, value, error, disabled, customers, inputClassName, onChange, onSelect }) {
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+  const query = String(value || "").trim().toLowerCase();
+  const queryDigits = query.replace(/\D/g, "");
+  const suggestions = customers
+    .filter((customer) => {
+      if (!query) return true;
+      const name = String(customer.name || customer.companyName || "").toLowerCase();
+      const mobile = String(customer.mobile || customer.phone || "");
+      const mobileDigits = mobile.replace(/\D/g, "");
+      return name.includes(query) || mobile.toLowerCase().includes(query) || (queryDigits && mobileDigits.includes(queryDigits));
+    })
+    .slice(0, 6);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function closeOnOutsideClick(event) {
+      if (!containerRef.current?.contains(event.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    return () => document.removeEventListener("mousedown", closeOnOutsideClick);
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
+        {field.label}
+        {field.required && <span className="ml-0.5 text-[var(--danger)]">*</span>}
+      </label>
+      <input
+        type={field.type === "tel" || field.inputMode === "numeric" ? "tel" : "text"}
+        value={value || ""}
+        disabled={disabled}
+        inputMode={field.inputMode}
+        maxLength={field.maxLength}
+        autoComplete="off"
+        aria-autocomplete="list"
+        aria-expanded={open}
+        placeholder={field.placeholder}
+        onFocus={() => setOpen(true)}
+        onChange={(event) => {
+          let nextValue = event.target.value;
+          if (field.digitsOnly) nextValue = nextValue.replace(/\D/g, "");
+          if (field.maxLength) nextValue = nextValue.slice(0, field.maxLength);
+          onChange(nextValue);
+          setOpen(true);
+        }}
+        className={inputClassName}
+      />
+      {open && !disabled && suggestions.length > 0 && (
+        <div role="listbox" className="absolute z-40 mt-1 max-h-64 w-full min-w-[18rem] overflow-y-auto rounded-md border border-[var(--line)] bg-white p-1 shadow-lg">
+          {suggestions.map((customer) => {
+            const mobile = customer.mobile || customer.phone || "";
+            const location = [customer.billingCity, customer.billingState].filter(Boolean).join(", ");
+            return (
+              <button
+                key={keyOf(customer)}
+                type="button"
+                role="option"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onSelect(customer);
+                  setOpen(false);
+                }}
+                className="block w-full rounded px-2.5 py-2 text-left hover:bg-slate-50"
+              >
+                <span className="block text-sm font-medium text-[var(--ink)]">{customer.name || customer.companyName}</span>
+                <span className="block text-xs text-[var(--muted)]">
+                  {[mobile, location].filter(Boolean).join(" · ")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
+    </div>
+  );
+}
+
 function uniqueOptions(values) {
   return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function totalPayments(formValues) {
+  if (Array.isArray(formValues?.payments)) {
+    return formValues.payments.reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+  }
+  return Number(formValues?.amountReceived) || 0;
 }
 
 function normalizeFilterValue(value) {
@@ -273,12 +478,14 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
           product.code === row.productCode || productMatchesComposition(product, row.composition, compositionRows)
         )
       : products;
+    const medicineDisabled = readOnly || (column.dependsOnComposition && !row.composition);
     return (
-      <select
-        disabled={readOnly || (column.dependsOnComposition && !row.composition)}
+      <MedicineSelect
+        disabled={medicineDisabled}
         value={row.productCode || ""}
-        onChange={(event) => {
-          const code = event.target.value;
+        options={options}
+        placeholder={column.dependsOnComposition && !row.composition ? "Select composition first..." : "Select medicine..."}
+        onChange={(code) => {
           const product = products.find((p) => p.code === code);
           const customer = salesData.getRecord("customer-management", formValues.customerId);
           onChange({
@@ -288,21 +495,15 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
             hsn: product?.hsnCode || "",
             composition: row.composition || product?.composition || product?.genericName || "",
             genericName: product?.genericName || "",
+            category: product?.category || "",
+            location: productLocation(product),
             uom: productUnit(product),
             rate: product?.sellingPrice ?? product?.price ?? row.rate ?? 0,
             discountPercent: customer?.discountPercent ?? row.discountPercent ?? 0,
             gstRate: product?.gst ?? row.gstRate ?? 18,
           });
         }}
-        className="w-full min-w-[300px] rounded border border-[var(--line)] px-2 py-2 text-sm disabled:bg-slate-50 disabled:text-[var(--muted)]"
-      >
-        <option value="">{column.dependsOnComposition && !row.composition ? "Select composition first..." : "Select medicine..."}</option>
-        {options.map((p) => (
-          <option key={p.code} value={p.code}>
-            {p.code} — {p.name}
-          </option>
-        ))}
-      </select>
+      />
     );
   }
 
@@ -359,10 +560,19 @@ function LineItemCell({ column, row, disabled, onChange, formValues, ctx }) {
   );
 }
 
-function LineItemsField({ field, rows, disabled, onChange, formValues, ctx }) {
+function LineItemsField({ field, rows, disabled, onChange, onFormValueChange, formValues, formErrors, ctx }) {
   const items = Array.isArray(rows) ? rows : [];
   const isMedicineRequest = field.variant === "medicine-request";
-  const requestTotal = items.reduce((sum, item) => sum + (Number(item.qty) || 0) * (Number(item.rate) || 0), 0);
+  const paymentModes = Array.isArray(field.paymentModes) ? field.paymentModes : [];
+  const payments = Array.isArray(formValues.payments) && formValues.payments.length
+    ? formValues.payments
+    : [{ mode: formValues.paymentMode || "Cash", amount: formValues.amountReceived ?? "" }];
+  const deliveryCharge = field.showDeliveryCharge ? Number(formValues.freight) || 0 : 0;
+  const itemSummary = computeOrderTotals(items, {
+    destinationState: formValues.destinationState,
+    freight: deliveryCharge,
+  });
+  const gstTotal = itemSummary.totalCGST + itemSummary.totalSGST + itemSummary.totalIGST;
   return (
     <div>
       {isMedicineRequest && (
@@ -432,10 +642,131 @@ function LineItemsField({ field, rows, disabled, onChange, formValues, ctx }) {
         </button>
       )}
       {isMedicineRequest && (
-        <div className="mt-4 flex justify-end">
-          <div className="flex w-full max-w-sm items-center justify-between rounded-md border border-[var(--line)] bg-slate-50 px-4 py-4">
-            <span className="font-semibold text-[var(--ink)]">Total Request Value</span>
-            <span className="font-semibold text-[var(--ink)]">{money.format(requestTotal)}</span>
+        <div className={`mt-4 ${paymentModes.length ? "grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:items-start" : "flex justify-end"}`}>
+          {paymentModes.length > 0 && (
+            <section className="min-w-0 max-w-2xl">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-baseline gap-2">
+                  <h3 className="text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">Payment Details</h3>
+                  {payments.length > 1 && (
+                    <span className="text-xs text-[var(--muted)]">Total: {money.format(totalPayments({ payments }))}</span>
+                  )}
+                </div>
+                {!disabled && (
+                  <button
+                    type="button"
+                    onClick={() => onFormValueChange("payments", [...payments, { mode: "", amount: "" }])}
+                    className="inline-flex items-center gap-1 rounded-md border border-[var(--line)] px-2 py-1 text-xs font-semibold text-[var(--primary)] hover:bg-blue-50"
+                  >
+                    <Plus size={13} /> Add Payment
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                <div className="hidden grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.65fr)_2rem] gap-2 px-1 text-xs font-medium text-[var(--muted)] sm:grid">
+                  <span>Payment Mode<span className="ml-0.5 text-[var(--danger)]">*</span></span>
+                  <span>Amount Received</span>
+                  <span />
+                </div>
+                {payments.map((payment, index) => (
+                  <div key={index} className="grid grid-cols-1 gap-2 rounded-md border border-[var(--line)] bg-slate-50/60 p-2 sm:grid-cols-[minmax(12rem,1fr)_minmax(9rem,0.65fr)_2rem] sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
+                    <label className="text-xs font-medium text-[var(--muted)] sm:contents">
+                      <span className="sm:hidden">Payment Mode<span className="ml-0.5 text-[var(--danger)]">*</span></span>
+                      <select
+                        value={payment.mode || ""}
+                        disabled={disabled}
+                        aria-label={`Payment mode ${index + 1}`}
+                        onChange={(event) => {
+                          const updated = [...payments];
+                          updated[index] = { ...payment, mode: event.target.value };
+                          onFormValueChange("payments", updated);
+                        }}
+                        className="h-9 w-full rounded-md border border-[var(--line)] bg-white px-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-[var(--muted)]"
+                      >
+                        <option value="">Select payment mode...</option>
+                        {paymentModes.map((mode) => <option key={mode} value={mode}>{mode}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-[var(--muted)] sm:contents">
+                      <span className="sm:hidden">Amount Received</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        inputMode="decimal"
+                        placeholder="0.00"
+                        value={payment.amount ?? ""}
+                        disabled={disabled}
+                        aria-label={`Amount received ${index + 1}`}
+                        onChange={(event) => {
+                          const amount = event.target.value;
+                          if (amount !== "" && Number(amount) < 0) return;
+                          const updated = [...payments];
+                          updated[index] = { ...payment, amount };
+                          onFormValueChange("payments", updated);
+                        }}
+                        className="h-9 w-full rounded-md border border-[var(--line)] bg-white px-2 text-right text-sm tabular-nums text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-[var(--muted)]"
+                      />
+                    </label>
+                    {!disabled && payments.length > 1 ? (
+                      <button
+                        type="button"
+                        aria-label={`Remove payment ${index + 1}`}
+                        onClick={() => onFormValueChange("payments", payments.filter((_, paymentIndex) => paymentIndex !== index))}
+                        className="inline-flex h-8 w-8 items-center justify-center justify-self-end rounded text-[var(--muted)] hover:bg-red-50 hover:text-[var(--danger)]"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    ) : <span className="hidden sm:block" />}
+                  </div>
+                ))}
+              </div>
+              {formErrors.payments && <p className="mt-1 text-xs text-[var(--danger)]">{formErrors.payments}</p>}
+            </section>
+          )}
+          <div className={`w-full max-w-sm rounded-md border border-[var(--line)] bg-slate-50 px-4 py-3 text-sm ${paymentModes.length ? "lg:justify-self-end" : ""}`}>
+            <div className="flex items-center justify-between gap-4 py-0.5">
+              <span className="text-[var(--muted)]">Subtotal</span>
+              <span className="tabular-nums text-[var(--ink)]">{money.format(itemSummary.subtotal)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-0.5">
+              <span className="text-[var(--muted)]">Discount</span>
+              <span className="tabular-nums text-[var(--ink)]">{money.format(-itemSummary.totalDiscount)}</span>
+            </div>
+            <div className="flex items-center justify-between gap-4 py-0.5">
+              <span className="text-[var(--muted)]">GST</span>
+              <span className="tabular-nums text-[var(--ink)]">{money.format(gstTotal)}</span>
+            </div>
+            {field.showDeliveryCharge && (
+              <div className="flex items-center justify-between gap-4 py-1">
+                <label htmlFor={`${field.key}-delivery-charge`} className="text-[var(--muted)]">
+                  Delivery Charge
+                </label>
+                <div className="relative w-32">
+                  <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-[var(--muted)]">₹</span>
+                  <input
+                    id={`${field.key}-delivery-charge`}
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    inputMode="decimal"
+                    placeholder="0.00"
+                    value={formValues.freight ?? ""}
+                    disabled={disabled}
+                    onChange={(event) => {
+                      const nextValue = event.target.value;
+                      if (nextValue === "" || Number(nextValue) >= 0) onFormValueChange("freight", nextValue);
+                    }}
+                    className="w-full rounded-md border border-[var(--line)] bg-white py-1.5 pl-7 pr-2 text-right text-sm tabular-nums text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100 disabled:bg-slate-100 disabled:text-[var(--muted)]"
+                    aria-label="Delivery Charge"
+                  />
+                </div>
+              </div>
+            )}
+            <div className="mt-2 flex items-center justify-between gap-4 border-t border-[var(--line)] pt-2 font-semibold text-[var(--ink)]">
+              <span>Grand Total</span>
+              <span className="tabular-nums">{money.format(itemSummary.grandTotal)}</span>
+            </div>
           </div>
         </div>
       )}
@@ -443,7 +774,7 @@ function LineItemsField({ field, rows, disabled, onChange, formValues, ctx }) {
   );
 }
 
-function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
+function Field({ field, value, error, disabled, onChange, onFormValueChange, formValues, formErrors = {}, ctx }) {
   const baseInput = `w-full rounded-md border bg-white px-3 py-2 text-sm text-[var(--ink)] outline-none focus:border-[var(--primary)] focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50 disabled:text-[var(--muted)] ${
     error ? "border-[var(--danger)] focus:ring-red-100" : "border-[var(--line)]"
   }`;
@@ -452,9 +783,27 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
   if (field.type === "lineItems") {
     return (
       <div>
-        <LineItemsField field={field} rows={value} disabled={disabled} onChange={onChange} formValues={formValues} ctx={ctx} />
+        <LineItemsField field={field} rows={value} disabled={disabled} onChange={onChange} onFormValueChange={onFormValueChange} formValues={formValues} formErrors={formErrors} ctx={ctx} />
         {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
       </div>
+    );
+  }
+
+  if (field.type === "customer-autocomplete") {
+    const customers = salesData
+      .getRows("customer-management")
+      .filter((customer) => customer.status !== "Inactive");
+    return (
+      <CustomerAutocomplete
+        field={field}
+        value={value}
+        error={error}
+        disabled={disabled}
+        customers={customers}
+        inputClassName={baseInput}
+        onChange={onChange}
+        onSelect={(customer) => onFormValueChange("customerId", keyOf(customer))}
+      />
     );
   }
 
@@ -533,7 +882,7 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
 
   if (field.type === "bill-payment-summary") {
     const totals = computeOrderTotals(formValues.items, formValues);
-    const received = Number(formValues.amountReceived) || 0;
+    const received = totalPayments(formValues);
     const balance = Math.max(0, totals.grandTotal - received);
     return (
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -628,8 +977,12 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
   if (field.type === "textarea") {
     return (
       <div className={field.span === "full" ? "sm:col-span-2 lg:col-span-3" : ""}>
-        <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">{field.label}</label>
+        <label className="mb-1.5 block text-sm font-medium text-[var(--ink)]">
+          {field.label}
+          {field.required && <span className="ml-0.5 text-[var(--danger)]">*</span>}
+        </label>
         <textarea value={value || ""} disabled={disabled} onChange={(event) => onChange(event.target.value)} rows={3} className={baseInput} />
+        {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
       </div>
     );
   }
@@ -655,11 +1008,19 @@ function Field({ field, value, error, disabled, onChange, formValues, ctx }) {
         {field.autoLabel && <span className="ml-1.5 text-xs font-normal text-[var(--muted)]">({field.autoLabel})</span>}
       </label>
       <input
-        type={field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "datetime-local" ? "datetime-local" : "text"}
+        type={field.type === "number" ? "number" : field.type === "date" ? "date" : field.type === "datetime-local" ? "datetime-local" : field.type === "tel" ? "tel" : "text"}
         value={field.type === "datetime-local" && /^\d{4}-\d{2}-\d{2}$/.test(value || "") ? `${value}T00:00` : value || ""}
         disabled={disabled || Boolean(field.autoLabel) || field.readOnly}
         placeholder={field.placeholder}
-        onChange={(event) => onChange(event.target.value)}
+        inputMode={field.inputMode}
+        maxLength={field.maxLength}
+        pattern={field.pattern}
+        onChange={(event) => {
+          let nextValue = event.target.value;
+          if (field.digitsOnly) nextValue = nextValue.replace(/\D/g, "");
+          if (field.maxLength) nextValue = nextValue.slice(0, field.maxLength);
+          onChange(nextValue);
+        }}
         className={baseInput}
       />
       {error && <p className="mt-1 text-xs text-[var(--danger)]">{error}</p>}
@@ -715,6 +1076,7 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
             paymentMode: "Cash",
             amountReceived: "",
             paymentReference: "",
+            payments: [{ mode: "Cash", amount: "" }],
           }
         : {}),
     };
@@ -738,6 +1100,10 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
     return base;
   });
 
+  useEffect(() => {
+    if (!isCreate && existingRecord) setValues({ ...existingRecord });
+  }, [existingRecord, isCreate]);
+
   const [activeTab, setActiveTab] = useState(entity.form.tabs[0].key);
   const [errors, setErrors] = useState({});
   const [errorBanner, setErrorBanner] = useState("");
@@ -746,28 +1112,46 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
   const [dispositionDraft, setDispositionDraft] = useState("Restock");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
   const [paymentDraft, setPaymentDraft] = useState({ amount: "", mode: "Bank Transfer", reference: "", notes: "" });
+  const [isSaving, setIsSaving] = useState(false);
 
   const ctx = { salesData, masterData };
 
-  function setField(key, value) {
-    setValues((prev) => ({ ...prev, [key]: value }));
-  }
-
   function handleFieldChange(field, next) {
     if (LINK_FIELD_KEYS.includes(field.key)) {
-      setValues((prev) => ({ ...prev, ...buildLinkedPatch(entityKey, field.key, next, salesData, masterData, Array.isArray(prev.items) && prev.items.length === 0) }));
+      setValues((prev) => {
+        const patch = buildLinkedPatch(entityKey, field.key, next, salesData, masterData, Array.isArray(prev.items) && prev.items.length === 0);
+        if (isCreateBill && field.key === "customerId" && patch.customerMobile) {
+          patch.customerMobile = String(patch.customerMobile).replace(/\D/g, "").slice(-10);
+        }
+        return { ...prev, ...patch };
+      });
       return;
     }
-    setField(field.key, next);
+    setValues((prev) => {
+      const updated = { ...prev, [field.key]: next };
+      (field.clearOnChange || []).forEach((key) => {
+        updated[key] = "";
+      });
+      return updated;
+    });
   }
 
   function validate() {
     const nextErrors = {};
     let firstInvalidTab = null;
     (isCreateBill ? billTabs : entity.form.tabs).forEach((tab) => {
-      tab.fields.forEach((field) => {
-        if (field.required && !field.autoLabel && !String(values[field.key] ?? "").trim()) {
+      tab.fields.flatMap((field) => [field, ...(field.paymentFields || [])]).forEach((field) => {
+        const fieldValue = String(values[field.key] ?? "").trim();
+        if (field.required && !field.autoLabel && !fieldValue) {
           nextErrors[field.key] = `${field.label} is required.`;
+          if (!firstInvalidTab) firstInvalidTab = tab.key;
+          return;
+        }
+        if (field.digitsOnly && fieldValue && !/^\d+$/.test(fieldValue)) {
+          nextErrors[field.key] = `${field.label} must contain numbers only.`;
+          if (!firstInvalidTab) firstInvalidTab = tab.key;
+        } else if (field.maxLength && fieldValue.length > field.maxLength) {
+          nextErrors[field.key] = `${field.label} must not exceed ${field.maxLength} digits.`;
           if (!firstInvalidTab) firstInvalidTab = tab.key;
         }
       });
@@ -781,6 +1165,16 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
         if (!firstInvalidTab) firstInvalidTab = "items";
       }
     }
+    if (isCreateBill) {
+      const payments = Array.isArray(values.payments) ? values.payments : [];
+      if (payments.length === 0 || payments.some((payment) => !String(payment.mode || "").trim())) {
+        nextErrors.payments = "Select a payment mode for every payment row.";
+        if (!firstInvalidTab) firstInvalidTab = "items";
+      } else if (totalPayments(values) > computeOrderTotals(values.items, values).grandTotal) {
+        nextErrors.payments = "Amount received cannot exceed the bill total.";
+        if (!firstInvalidTab) firstInvalidTab = "items";
+      }
+    }
     setErrors(nextErrors);
     if (firstInvalidTab) {
       setActiveTab(firstInvalidTab);
@@ -791,49 +1185,75 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
     return true;
   }
 
-  function persist(patch) {
+  async function persist(patch) {
     const key = keyOf(values);
     const record = { ...values, ...patch, updatedBy: "You", updatedAt: now() };
     if (isCreateBill) delete record.salesChannel;
+    let savedRecord;
     if (isCreate) {
       record.createdBy = "You";
       record.createdAt = now();
-      salesData.addRow(entityKey, record);
+      savedRecord = await salesData.addRow(entityKey, record);
     } else {
-      salesData.updateRow(entityKey, key, record);
+      savedRecord = await salesData.updateRow(entityKey, key, record);
     }
-    setValues(record);
-    return record;
+    const nextRecord = savedRecord || record;
+    setValues(nextRecord);
+    return nextRecord;
   }
 
-  function handleFirstSave() {
-    if (!validate()) return;
+  async function handleFirstSave() {
+    if (isSaving || !validate()) return;
     const billTotals = isCreateBill ? computeOrderTotals(values.items, values) : null;
-    const amountReceived = Number(values.amountReceived) || 0;
-    const record = persist({
-      status: "Draft",
-      ...(isCreateBill
-        ? {
-            billNumber: values.id,
-            billTotal: billTotals.grandTotal,
-            amountReceived,
-            paymentStatus:
-              amountReceived >= billTotals.grandTotal
-                ? "Paid"
-                : amountReceived > 0
-                  ? "Partially Paid"
-                  : "Unpaid",
-          }
-        : {}),
-    });
-    showToast(isCreateBill ? `${keyOf(record)} saved in Sales Order.` : `${keyOf(record)} created.`);
-    navigate(isCreateBill ? "/sales/sales-order" : `/sales/${entityKey}/${keyOf(record)}/view`);
+    const amountReceived = totalPayments(values);
+    const payments = isCreateBill
+      ? (values.payments || [])
+          .filter((payment) => payment.mode && payment.amount !== "" && Number(payment.amount) > 0)
+          .map((payment) => ({ date: today(), mode: payment.mode, amount: Number(payment.amount) }))
+      : values.payments;
+    setIsSaving(true);
+    setErrorBanner("");
+    try {
+      const record = await persist({
+        status: "Draft",
+        ...(isCreateBill
+          ? {
+              billNumber: values.id,
+              billTotal: billTotals.grandTotal,
+              amountReceived,
+              paymentMode: values.payments?.[0]?.mode || values.paymentMode,
+              payments,
+              paymentStatus:
+                amountReceived >= billTotals.grandTotal
+                  ? "Paid"
+                  : amountReceived > 0
+                    ? "Partially Paid"
+                    : "Unpaid",
+            }
+          : {}),
+      });
+      showToast(isCreateBill ? `${keyOf(record)} saved in Sales Order.` : `${keyOf(record)} created.`);
+      navigate(isCreateBill ? "/sales/sales-order" : `/sales/${entityKey}/${keyOf(record)}/view`);
+    } catch (error) {
+      setErrorBanner(error.message || "Unable to save the bill.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
-  function handleSaveChanges() {
-    persist({});
-    showToast(`${values.id} saved.`);
-    navigate(`/sales/${entityKey}`);
+  async function handleSaveChanges() {
+    if (isSaving) return;
+    setIsSaving(true);
+    setErrorBanner("");
+    try {
+      await persist({});
+      showToast(`${values.id} saved.`);
+      navigate(`/sales/${entityKey}`);
+    } catch (error) {
+      setErrorBanner(error.message || "Unable to save changes.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function runTransition(action) {
@@ -860,7 +1280,7 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
     applyTransition(action, {});
   }
 
-  function applyTransition(action, extra) {
+  async function applyTransition(action, extra) {
     if (action.salesEffect === "reserveStock") salesData.reserveStock(values.items);
     if (action.salesEffect === "releaseStock") salesData.releaseStock(values.items);
     if (action.salesEffect === "dispatchStock") salesData.dispatchStock(values.items, values.warehouse);
@@ -876,10 +1296,18 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
       patch.creditNoteAmount = Math.round(totals.grandTotal * 100) / 100;
     }
 
-    const record = persist(patch);
-    showToast(`${keyOf(record)} is now ${action.to}.`);
-    setPendingAction(null);
-    setReasonDraft("");
+    setIsSaving(true);
+    setErrorBanner("");
+    try {
+      const record = await persist(patch);
+      showToast(`${keyOf(record)} is now ${action.to}.`);
+      setPendingAction(null);
+      setReasonDraft("");
+    } catch (error) {
+      setErrorBanner(error.message || "Unable to update the sales record.");
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function submitPayment() {
@@ -905,46 +1333,77 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
   const configuredPaymentModes = masterData
     .getRows("payment-mode")
     .filter((row) => row.status === "Active")
-    .map((row) => row.name)
+    .map((row) => {
+      const name = String(row.name || "").trim();
+      const bank = String(row.bank || "").trim();
+      return bank ? `${name} (${bank})` : name;
+    })
     .filter(Boolean);
-  const configuredCustomerTypes = masterData
+  const configuredCustomerTypeRows = masterData
     .getRows("customer-type")
-    .filter((row) => row.status !== "Inactive")
+    .filter((row) => row.status !== "Inactive");
+  const configuredCustomerTypes = configuredCustomerTypeRows
     .map((row) => row.name)
     .filter(Boolean);
   const customerTypeOptions = configuredCustomerTypes.length
     ? configuredCustomerTypes
     : ["Retail Customer", "Wholesale Customer", "Hospital / Clinic"];
+  const selectedCustomerType = configuredCustomerTypeRows.find(
+    (row) => normalizeFilterValue(row.name) === normalizeFilterValue(values.customerType)
+  );
+  const customerAddressRequired = normalizeFilterValue(selectedCustomerType?.addressRequired) === "yes";
+  const stateDistricts = masterData.locationOptions || {};
+  const stateOptions = Object.keys(stateDistricts);
+  const districtOptions = values.destinationState ? stateDistricts[values.destinationState] || [] : [];
+  const billPaymentModes = configuredPaymentModes.length
+    ? configuredPaymentModes
+    : ["Cash", "UPI", "Credit / Debit Card", "Credit Account"];
   const billTabs = isCreateBill
     ? [
         ...entity.form.tabs
-          .filter((tab) => tab.key !== "credit")
+          .filter((tab) => !["credit", "totals"].includes(tab.key))
+          .filter((tab) => tab.key !== "billing" || customerAddressRequired)
           .map((tab) => ({
             ...tab,
-            fields: tab.fields.map((field) =>
-              field.key === "salesChannel"
-                ? { key: "customerType", label: "Customer Type", type: "select", required: true, options: customerTypeOptions }
-                : field
-            ),
+            fields: tab.fields
+              .filter((field) => !(tab.key === "overview" && field.key === "billingAddress"))
+              .map((field) => {
+                if (field.key === "salesChannel") {
+                  return { key: "customerType", label: "Customer Type", type: "select", required: true, options: customerTypeOptions, clearOnChange: ["freight"] };
+                }
+                if (field.key === "customerName") {
+                  return { ...field, type: "customer-autocomplete", clearOnChange: ["customerId"] };
+                }
+                if (field.key === "customerMobile") {
+                  return { ...field, type: "customer-autocomplete", digitsOnly: true, inputMode: "numeric", maxLength: 10, pattern: "[0-9]*", clearOnChange: ["customerId"] };
+                }
+                if (tab.key === "items" && field.type === "lineItems") {
+                  return {
+                    ...field,
+                    showDeliveryCharge: customerAddressRequired,
+                    paymentModes: billPaymentModes,
+                    columns: field.columns
+                      .filter((column) => column.key !== "remarks")
+                      .flatMap((column) =>
+                        column.key === "uom"
+                          ? [
+                              { ...column, label: "Unit" },
+                              { key: "discountPercent", label: "Discount (%)", type: "number", minWidth: 130 },
+                              { key: "gstRate", label: "GST (%)", type: "number", minWidth: 110 },
+                            ]
+                          : [column]
+                      ),
+                  };
+                }
+                if (tab.key === "billing" && field.key === "destinationState") {
+                  return { ...field, required: true, options: stateOptions, clearOnChange: ["district"] };
+                }
+                if (tab.key === "billing" && field.key === "district") {
+                  return { ...field, type: "select", required: true, options: districtOptions, disabled: !values.destinationState };
+                }
+                return tab.key === "billing" ? { ...field, required: true } : field;
+              }),
           })),
-        {
-          key: "payment",
-          label: "Payment Details",
-          fields: [
-            {
-              key: "paymentMode",
-              label: "Payment Mode",
-              type: "select",
-              required: true,
-              options: configuredPaymentModes.length
-                ? configuredPaymentModes
-                : ["Cash", "UPI", "Credit / Debit Card", "Credit Account"],
-            },
-            { key: "amountReceived", label: "Amount Received", type: "number" },
-            { key: "paymentReference", label: "Payment Reference", type: "text" },
-            { key: "billPaymentSummary", label: "Payment Summary", type: "bill-payment-summary" },
-          ],
-        },
       ]
     : entity.form.tabs;
 
@@ -957,10 +1416,12 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
           field={field}
           value={values[field.key]}
           error={errors[field.key]}
-          disabled={isView}
+          disabled={isView || field.disabled}
           formValues={values}
+          formErrors={errors}
           ctx={ctx}
           onChange={(next) => handleFieldChange(field, next)}
+          onFormValueChange={(key, next) => handleFieldChange({ key }, next)}
         />
       </div>
     );
@@ -1030,7 +1491,7 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
                 {tab.key !== "items" && (
                   <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--muted)]">{tab.label}</h3>
                 )}
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 ${tab.key === "overview" ? "xl:grid-cols-5" : ""}`}>
                   {tab.fields.map(renderFormField)}
                 </div>
               </section>
@@ -1099,15 +1560,15 @@ export function SalesForm({ entityKey, mode, recordId, presentation = "standard"
           </button>
         )}
         {isCreate && (
-          <button type="button" onClick={handleFirstSave} className="inline-flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
+          <button type="button" disabled={isSaving} onClick={handleFirstSave} className="inline-flex items-center gap-1.5 rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)] disabled:cursor-not-allowed disabled:opacity-60">
             {isCreateBill && <ReceiptIndianRupee size={16} />}
-            {isCreateBill ? "Save Bill" : "Save Draft"}
+            {isSaving ? "Saving..." : isCreateBill ? "Save Bill" : "Save Draft"}
           </button>
         )}
         {mode === "edit" && (
           <>
-            <button type="button" onClick={handleSaveChanges} className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50">
-              Save Changes
+            <button type="button" disabled={isSaving} onClick={handleSaveChanges} className="rounded-md border border-[var(--line)] px-4 py-2 text-sm font-semibold text-[var(--ink)] hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60">
+              {isSaving ? "Saving..." : "Save Changes"}
             </button>
             <Link to={`/sales/${entityKey}/${values.id}/view`} className="rounded-md bg-[var(--primary)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--primary-deep)]">
               Done Editing
